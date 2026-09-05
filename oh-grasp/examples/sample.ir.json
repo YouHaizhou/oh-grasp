@@ -1,0 +1,20 @@
+{
+  "meta": {
+    "title": "sample.js",
+    "subtitle": "读取并解析 JSON 配置，按配置处理记录并建立索引。",
+    "input": ["config 文件路径", "records 数组"],
+    "output": ["处理后的记录", "按 id 建立的索引"]
+  },
+  "modules": [
+    { "id": "ext_fs", "label": "fs", "type": "external", "description": "读取配置文件", "input": ["readFileSync"] },
+    { "id": "read_config", "label": "readConfig", "type": "internal", "description": "读文件并交给解析", "detail": "读取指定路径的配置文件，用 fs.readFileSync 同步读取整个文件为 UTF-8 字符串，再原样交给 parseConfig 解析。此处不做任何校验或转换。", "source": "function readConfig(path) {\n  const raw = fs.readFileSync(path, 'utf8');\n  return parseConfig(raw);\n}" },
+    { "id": "parse_config", "label": "parseConfig", "type": "internal", "description": "把原始文本解析成对象", "detail": "接收 readConfig 传来的原始文本，调用 JSON.parse 解析为配置对象。解析失败时异常会向上抛出，由调用方决定如何处理。", "source": "function parseConfig(raw) {\n  return JSON.parse(raw);\n}" },
+    { "id": "process_records", "label": "processRecords", "type": "internal", "description": "按配置为每条记录打上 source", "detail": "遍历 records 数组，为每条记录展开并附加 config.source 字段，生成带来源标记的新记录，供后续按来源追踪或过滤。", "source": "function processRecords(records, config) {\n  return records.map(r => ({\n    ...r,\n    source: config.source,\n  }));\n}" },
+    { "id": "build_index", "label": "buildIndex", "type": "internal", "description": "按 id 建立记录索引", "detail": "接收处理后的记录数组，以每条记录的 id 为键、记录本身为值，用 Object.fromEntries 构建查找索引，供按 id 快速取用。", "source": "function buildIndex(records) {\n  return Object.fromEntries(records.map(r => [r.id, r]));\n}" }
+  ],
+  "connections": [
+    { "from": "read_config", "to": "parse_config", "label": "raw" },
+    { "from": "parse_config", "to": "process_records", "label": "config" },
+    { "from": "process_records", "to": "build_index", "label": "records" }
+  ]
+}
