@@ -72,14 +72,18 @@
 
     var fl = flowLayout();
     var groups = fl.groups, edges = fl.edges;
-    var CW = 220, CH = 78, PITCH = 150, TOP = 20, W = 720;
+    var CW = 220, CH = 78, PITCH = 150, TOP = 20, GAP = 40, PAD = 40;
     var keys = Object.keys(groups).map(Number).sort(function (a, b) { return a - b; });
+    var layerW = {};
+    keys.forEach(function (L) {
+      layerW[L] = groups[L].length * CW + (groups[L].length - 1) * GAP;
+    });
+    var W = (keys.length ? Math.max.apply(null, keys.map(function (L) { return layerW[L]; })) : 0) + 2 * PAD;
     var pos = {};
     keys.forEach(function (L) {
       var ids = groups[L];
-      var total = ids.length * CW + (ids.length - 1) * 40;
-      var x = (W - total) / 2;
-      ids.forEach(function (id) { pos[id] = { x: x, y: TOP + L * PITCH }; x += CW + 40; });
+      var x = (W - layerW[L]) / 2;
+      ids.forEach(function (id) { pos[id] = { x: x, y: TOP + L * PITCH }; x += CW + GAP; });
     });
     var H = TOP + (keys.length ? Math.max.apply(null, keys) : 0) * PITCH + CH + 20;
     var svg = '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">';
@@ -122,7 +126,7 @@
         '<div class="vA-modal">' +
         '<div class="vA-detail-head"><span class="vA-detail-name">' + esc(m.label) + '</span><span class="vA-detail-kind">internal</span><button class="vA-detail-close" id="detailClose">×</button></div>' +
         '<p class="vA-detail-desc">' + esc(m.detail || m.description) + '</p>' +
-        (m.source ? '<h4>源码 Source</h4><pre class="vA-src"><code>' + esc(m.source) + '</code></pre>' : '') +
+        (m.source ? '<h4>源码 Source' + (typeof m.sourceLine === 'number' ? ' · 第 ' + m.sourceLine + ' 行' : '') + '</h4><pre class="vA-src"><code>' + esc(m.source) + '</code></pre>' : '') +
         '</div>';
       detail.classList.add('open');
       root.querySelectorAll('.node').forEach(function (g) { g.classList.toggle('sel', g.dataset.id === id); });
@@ -138,6 +142,14 @@
     view.apply = function () {
       zt.style.transform = 'translate(' + view.tx + 'px,' + view.ty + 'px) scale(' + view.scale + ')';
       zb.textContent = Math.round(view.scale * 100) + '%';
+    };
+    view.fit = function () {
+      var vw = vp.clientWidth, vh = vp.clientHeight;
+      var s = Math.min(1, vw / W, vh / H);
+      view.scale = s;
+      view.tx = (vw - W * s) / 2;
+      view.ty = (vh - H * s) / 2;
+      view.apply();
     };
     vp.addEventListener('wheel', function (e) {
       e.preventDefault();
@@ -155,7 +167,8 @@
       view.sx = e.clientX; view.sy = e.clientY; view.ox = view.tx; view.oy = view.ty;
       e.preventDefault();
     });
-    vp.addEventListener('dblclick', function () { view.scale = 1; view.tx = 0; view.ty = 0; view.apply(); });
+    vp.addEventListener('dblclick', function () { view.fit(); });
+    view.fit();
   }
 
   /* ============ B · Index ============ */

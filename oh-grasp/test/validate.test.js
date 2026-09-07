@@ -13,7 +13,7 @@ function validIR() {
     },
     modules: [
       { id: 'ext_fs', label: 'fs', type: 'external', description: 'Node filesystem', input: ['readFileSync'] },
-      { id: 'parse', label: 'parseConfig', type: 'internal', description: 'Parses raw config into an object', detail: 'Parses raw config text into an object.', source: 'function parseConfig(raw) {}' },
+      { id: 'parse', label: 'parseConfig', type: 'internal', description: 'Parses raw config into an object', detail: 'Parses raw config text into an object.', source: 'function parseConfig(raw) {\n  return JSON.parse(raw);\n}' },
       { id: 'proc', label: 'processRecords', type: 'internal', description: 'Transforms records', detail: 'Transforms records.', source: 'function processRecords() {}' },
     ],
     connections: [{ from: 'parse', to: 'proc', label: 'config' }],
@@ -22,7 +22,9 @@ function validIR() {
 
 const SOURCE = [
   "const fs = require('fs');",
-  'function parseConfig() {}',
+  'function parseConfig(raw) {',
+  '  return JSON.parse(raw);',
+  '}',
   'function processRecords() {}',
 ].join('\n');
 
@@ -178,5 +180,41 @@ test('existence check skipped when source omitted', () => {
   const ir = validIR();
   ir.modules[1].label = 'doesNotExist';
   const r = validate(ir);
+  assert.equal(r.ok, true);
+});
+
+test('source not a substring of the file fails', () => {
+  const ir = validIR();
+  ir.modules[1].source = 'function madeUp() { return 42; }';
+  const r = validate(ir, SOURCE);
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => e.path === 'modules[1].source'));
+});
+
+test('source matching after whitespace normalization passes', () => {
+  const ir = validIR();
+  ir.modules[1].source = 'function parseConfig(raw) {   return JSON.parse(raw); }';
+  const r = validate(ir, SOURCE);
+  assert.equal(r.ok, true);
+});
+
+test('sourceLine integer passes', () => {
+  const ir = validIR();
+  ir.modules[1].sourceLine = 2;
+  const r = validate(ir, SOURCE);
+  assert.equal(r.ok, true);
+});
+
+test('sourceLine non-integer fails', () => {
+  const ir = validIR();
+  ir.modules[1].sourceLine = 'two';
+  const r = validate(ir);
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => e.path === 'modules[1].sourceLine'));
+});
+
+test('sourceLine optional when omitted', () => {
+  const ir = validIR();
+  const r = validate(ir, SOURCE);
   assert.equal(r.ok, true);
 });

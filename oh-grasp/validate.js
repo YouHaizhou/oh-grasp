@@ -61,6 +61,9 @@ function validate(ir, source) {
             errors.push({ path: `${p}.${f}`, message: `internal module requires ${f} as a non-empty string` });
           }
         }
+        if (m.sourceLine !== undefined && m.sourceLine !== null && !Number.isInteger(m.sourceLine)) {
+          errors.push({ path: `${p}.sourceLine`, message: 'sourceLine must be an integer when provided' });
+        }
       } else if (m.type === 'external') {
         if (!isStrArray(m.input)) {
           errors.push({ path: `${p}.input`, message: 'external module requires input as an array of strings' });
@@ -105,6 +108,9 @@ function validate(ir, source) {
         if (m && m.type === 'internal' && isNonEmptyStr(m.label) && !identifierExists(source, m.label)) {
           errors.push({ path: `modules[${i}].label`, message: `internal module '${m.label}' not found in source` });
         }
+        if (m && m.type === 'internal' && isNonEmptyStr(m.source) && !sourceContains(source, m.source)) {
+          errors.push({ path: `modules[${i}].source`, message: `internal module '${m.label}' source not found in the source file` });
+        }
       });
     }
   }
@@ -118,6 +124,14 @@ function escapeRegExp(s) {
 
 function identifierExists(source, label) {
   return new RegExp('\\b' + escapeRegExp(label) + '\\b').test(source);
+}
+
+function normalizeWhitespace(s) {
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+function sourceContains(source, snippet) {
+  return normalizeWhitespace(source).includes(normalizeWhitespace(snippet));
 }
 
 module.exports = { validate };

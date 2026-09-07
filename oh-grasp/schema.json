@@ -47,7 +47,8 @@
         "type": { "enum": ["external", "internal"] },
         "description": { "type": "string", "description": "一句话说明职责/为什么需要它。" },
         "detail": { "type": "string", "description": "仅 internal 模块：更完整的职责说明（弹窗里显示，比 description 长）。" },
-        "source": { "type": "string", "description": "仅 internal 模块：该模块的真实源码/签名（弹窗里显示，从源文件原文摘出）。" },
+        "source": { "type": "string", "description": "仅 internal 模块：该模块的完整函数体原文（弹窗里显示，从源文件原文摘出，勿只给声明行）。" },
+        "sourceLine": { "type": "integer", "description": "仅 internal 模块：source 在源文件中的起始行号（可选，仅校验为整数，不校验行号值是否正确）。" },
         "input": {
           "type": "array",
           "items": { "type": "string" },
