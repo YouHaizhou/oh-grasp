@@ -56,7 +56,7 @@ docs/adr/                          架构决策记录
 ## 测试
 
 ```
-node --test oh-grasp/test/
+node --test
 ```
 
 ## Roadmap

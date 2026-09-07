@@ -4,3 +4,6 @@ MattSkill使用教程.md
 
 # Archify 输出参考样本 —— 保留在本地，不进仓库
 template/
+
+# 生成的交付物 —— 机器产出，不进仓库
+generated/
