@@ -23,6 +23,11 @@
       "description": "模块列表：外部模块（一个 import 一个）与内部模块（逻辑单元）。",
       "items": { "$ref": "#/definitions/module" }
     },
+    "groups": {
+      "type": "array",
+      "description": "内部模块的语义分组（可选）。折叠后顶层图按分组显示，每个分组至少 2 个成员。",
+      "items": { "$ref": "#/definitions/group" }
+    },
     "connections": {
       "type": "array",
       "description": "内部模块之间的数据流。from/to 都必须引用 internal 模块的 id。",
@@ -49,11 +54,23 @@
         "detail": { "type": "string", "description": "仅 internal 模块：更完整的职责说明（弹窗里显示，比 description 长）。" },
         "source": { "type": "string", "description": "仅 internal 模块：该模块的完整函数体原文（弹窗里显示，从源文件原文摘出，勿只给声明行）。" },
         "sourceLine": { "type": "integer", "description": "仅 internal 模块：source 在源文件中的起始行号（可选，仅校验为整数，不校验行号值是否正确）。" },
+        "group": { "type": "string", "description": "仅 internal 模块：所属分组的 id（可选，引用 groups[] 里的 id；留空表示单飞叶子）。" },
         "input": {
           "type": "array",
           "items": { "type": "string" },
           "description": "仅 external 模块必需：从它消费的具名成员（默认导入用 [\"default\"]）。"
         }
+      }
+    },
+    "group": {
+      "type": "object",
+      "required": ["id", "label", "description"],
+      "properties": {
+        "id": { "type": "string", "description": "唯一标识符（稳定小写，如 grp_dispatch）。" },
+        "label": { "type": "string", "description": "抽象分组名（如「命令分发」），无需对应源码标识符。" },
+        "description": { "type": "string", "description": "一句话说明这个分组做什么。" },
+        "inputSummary": { "type": "string", "description": "一句话说清流入该分组的数据（可选，折叠后显示在输入端口旁）。" },
+        "outputSummary": { "type": "string", "description": "一句话说清流出该分组的数据（可选，折叠后显示在输出端口旁）。" }
       }
     }
   }

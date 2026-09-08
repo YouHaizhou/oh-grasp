@@ -218,3 +218,94 @@ test('sourceLine optional when omitted', () => {
   const r = validate(ir, SOURCE);
   assert.equal(r.ok, true);
 });
+
+// === grouping ===
+function validGroupedIR() {
+  const ir = validIR();
+  ir.groups = [
+    { id: 'grp_core', label: '核心处理', description: '解析并处理记录', inputSummary: '原始配置', outputSummary: '处理后的记录' },
+  ];
+  ir.modules[1].group = 'grp_core';
+  ir.modules[2].group = 'grp_core';
+  return ir;
+}
+
+test('grouped IR passes validation', () => {
+  const r = validate(validGroupedIR());
+  assert.equal(r.ok, true);
+});
+
+test('grouped IR passes existence check with abstract group label', () => {
+  // group label '核心处理' is not a source identifier, but groups are exempt from the existence check
+  const r = validate(validGroupedIR(), SOURCE);
+  assert.equal(r.ok, true);
+});
+
+test('group missing label fails', () => {
+  const ir = validGroupedIR();
+  delete ir.groups[0].label;
+  const r = validate(ir);
+  assert.ok(r.errors.some((e) => e.path === 'groups[0].label'));
+});
+
+test('group missing description fails', () => {
+  const ir = validGroupedIR();
+  delete ir.groups[0].description;
+  const r = validate(ir);
+  assert.ok(r.errors.some((e) => e.path === 'groups[0].description'));
+});
+
+test('duplicate group id fails', () => {
+  const ir = validGroupedIR();
+  ir.groups.push({ id: 'grp_core', label: '另一个', description: 'x' });
+  const r = validate(ir);
+  assert.ok(r.errors.some((e) => e.path === 'groups[1].id'));
+});
+
+test('group with fewer than 2 members fails', () => {
+  const ir = validIR();
+  ir.groups = [{ id: 'grp_x', label: 'X', description: 'x' }];
+  ir.modules[1].group = 'grp_x';
+  const r = validate(ir);
+  assert.ok(r.errors.some((e) => e.path === 'groups[0]'));
+});
+
+test('internal group referencing unknown group fails', () => {
+  const ir = validGroupedIR();
+  ir.modules[1].group = 'grp_missing';
+  const r = validate(ir);
+  assert.ok(r.errors.some((e) => e.path === 'modules[1].group'));
+});
+
+test('internal group non-string fails', () => {
+  const ir = validGroupedIR();
+  ir.modules[1].group = 42;
+  const r = validate(ir);
+  assert.ok(r.errors.some((e) => e.path === 'modules[1].group'));
+});
+
+test('group inputSummary non-string fails', () => {
+  const ir = validGroupedIR();
+  ir.groups[0].inputSummary = 42;
+  const r = validate(ir);
+  assert.ok(r.errors.some((e) => e.path === 'groups[0].inputSummary'));
+});
+
+test('ungrouped leaf alongside grouped modules passes', () => {
+  const ir = validGroupedIR();
+  ir.modules.push({ id: 'util', label: 'helper', type: 'internal', description: 'Utility', detail: 'Utility.', source: 'function helper() {}' });
+  const r = validate(ir);
+  assert.equal(r.ok, true);
+});
+
+test('no groups is backward compatible', () => {
+  const r = validate(validIR());
+  assert.equal(r.ok, true);
+});
+
+test('groups not an array fails', () => {
+  const ir = validIR();
+  ir.groups = 'nope';
+  const r = validate(ir);
+  assert.ok(r.errors.some((e) => e.path === 'groups'));
+});

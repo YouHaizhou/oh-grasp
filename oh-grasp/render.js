@@ -66,6 +66,20 @@ const CSS = `
   .vA-detail-desc { font-size: 14px; line-height: 1.7; color: var(--muted); margin: 0 0 16px; }
   .vA-modal h4 { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); margin: 0 0 8px; }
   .vA-empty { color: var(--faint); font-size: 13px; }
+  .port { cursor: pointer; }
+  .port:hover { fill: #6366f1; }
+  .vA-mini { display: block; width: 100%; height: auto; }
+  .vA-modal-wide { width: min(820px, 100%); }
+  .vA-modal-sm { width: min(420px, 100%); }
+  .vA-boundary { display: flex; flex-direction: column; gap: 6px; }
+  .vA-bedge { font-size: 13px; color: var(--muted); font-family: var(--mono); }
+  .vA-bedge-arrow { color: var(--accent-deep); }
+  .vA-bedge-lab { color: var(--text); }
+  .vA-pp-row { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .vA-pp-row:last-child { border-bottom: none; }
+  .vA-pp-mod { font-family: var(--mono); font-weight: 600; }
+  .vA-pp-arrow { color: var(--faint); }
+  .vA-pp-lab { color: var(--accent-deep); }
 
   /* ===== B · Index ===== */
   .vB { max-width: 960px; margin: 0 auto; padding: 48px 32px; }

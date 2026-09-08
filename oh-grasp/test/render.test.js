@@ -65,3 +65,20 @@ test('renderer script parses without syntax error', () => {
   assert.ok(renderer, 'renderer script block present');
   assert.doesNotThrow(() => new Function(renderer.body));
 });
+
+const GROUPED_IR = {
+  meta: IR.meta,
+  groups: [
+    { id: 'grp_core', label: '核心处理', description: '解析并处理记录', inputSummary: '原始配置', outputSummary: '记录' },
+  ],
+  modules: IR.modules.map((m) => (m.type === 'internal' ? { ...m, group: 'grp_core' } : { ...m })),
+  connections: IR.connections,
+};
+
+test('grouped IR round-trips through render', () => {
+  const html = render(GROUPED_IR);
+  const m = html.match(/<script[^>]*type="application\/json"[^>]*>([\s\S]*?)<\/script>/);
+  assert.ok(m, 'embedded IR script block exists');
+  const parsed = JSON.parse(m[1]);
+  assert.deepEqual(parsed, GROUPED_IR);
+});

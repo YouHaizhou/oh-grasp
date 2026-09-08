@@ -28,6 +28,42 @@ function validate(ir, source) {
     }
   }
 
+  // groups
+  const groupIds = new Set();
+  const groupMemberCount = {};
+  const groupIndex = {};
+  if (ir.groups !== undefined && ir.groups !== null) {
+    if (!Array.isArray(ir.groups)) {
+      errors.push({ path: 'groups', message: 'groups must be an array when provided' });
+    } else {
+      ir.groups.forEach((g, i) => {
+        const p = `groups[${i}]`;
+        if (!isObj(g)) {
+          errors.push({ path: p, message: 'must be an object' });
+          return;
+        }
+        for (const f of ['id', 'label', 'description']) {
+          if (!isNonEmptyStr(g[f])) {
+            errors.push({ path: `${p}.${f}`, message: `${f} must be a non-empty string` });
+          }
+        }
+        for (const f of ['inputSummary', 'outputSummary']) {
+          if (g[f] !== undefined && g[f] !== null && typeof g[f] !== 'string') {
+            errors.push({ path: `${p}.${f}`, message: `${f} must be a string when provided` });
+          }
+        }
+        if (isNonEmptyStr(g.id)) {
+          if (groupIds.has(g.id)) {
+            errors.push({ path: `${p}.id`, message: `duplicate group id '${g.id}'` });
+          }
+          groupIds.add(g.id);
+          groupMemberCount[g.id] = 0;
+          groupIndex[g.id] = i;
+        }
+      });
+    }
+  }
+
   // modules
   const ids = new Set();
   const internalIds = new Set();
@@ -64,10 +100,28 @@ function validate(ir, source) {
         if (m.sourceLine !== undefined && m.sourceLine !== null && !Number.isInteger(m.sourceLine)) {
           errors.push({ path: `${p}.sourceLine`, message: 'sourceLine must be an integer when provided' });
         }
+        if (m.group !== undefined && m.group !== null) {
+          if (!isNonEmptyStr(m.group)) {
+            errors.push({ path: `${p}.group`, message: 'group must be a non-empty string when provided' });
+          } else if (!groupIds.has(m.group)) {
+            errors.push({ path: `${p}.group`, message: `references unknown group '${m.group}'` });
+          } else {
+            groupMemberCount[m.group] += 1;
+          }
+        }
       } else if (m.type === 'external') {
         if (!isStrArray(m.input)) {
           errors.push({ path: `${p}.input`, message: 'external module requires input as an array of strings' });
         }
+      }
+    });
+  }
+
+  // group membership minimum
+  if (Array.isArray(ir.groups)) {
+    Object.keys(groupMemberCount).forEach((gid) => {
+      if (groupMemberCount[gid] < 2) {
+        errors.push({ path: `groups[${groupIndex[gid]}]`, message: `group '${gid}' must contain at least 2 internal modules (has ${groupMemberCount[gid]})` });
       }
     });
   }
