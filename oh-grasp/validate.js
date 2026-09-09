@@ -47,11 +47,6 @@ function validate(ir, source) {
             errors.push({ path: `${p}.${f}`, message: `${f} must be a non-empty string` });
           }
         }
-        for (const f of ['inputSummary', 'outputSummary']) {
-          if (g[f] !== undefined && g[f] !== null && typeof g[f] !== 'string') {
-            errors.push({ path: `${p}.${f}`, message: `${f} must be a string when provided` });
-          }
-        }
         if (isNonEmptyStr(g.id)) {
           if (groupIds.has(g.id)) {
             errors.push({ path: `${p}.id`, message: `duplicate group id '${g.id}'` });

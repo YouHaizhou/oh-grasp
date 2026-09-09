@@ -223,7 +223,7 @@ test('sourceLine optional when omitted', () => {
 function validGroupedIR() {
   const ir = validIR();
   ir.groups = [
-    { id: 'grp_core', label: '核心处理', description: '解析并处理记录', inputSummary: '原始配置', outputSummary: '处理后的记录' },
+    { id: 'grp_core', label: '核心处理', description: '解析并处理记录' },
   ];
   ir.modules[1].group = 'grp_core';
   ir.modules[2].group = 'grp_core';
@@ -284,11 +284,14 @@ test('internal group non-string fails', () => {
   assert.ok(r.errors.some((e) => e.path === 'modules[1].group'));
 });
 
-test('group inputSummary non-string fails', () => {
+test('removed group summary fields are tolerated (backward compat)', () => {
+  // ADR-0006: summaries removed from the contract; viewer derives I/O from edges.
+  // Leftover fields from an older IR must not fail validation.
   const ir = validGroupedIR();
-  ir.groups[0].inputSummary = 42;
+  ir.groups[0].inputSummary = '旧版遗留';
+  ir.groups[0].outputSummary = 42;
   const r = validate(ir);
-  assert.ok(r.errors.some((e) => e.path === 'groups[0].inputSummary'));
+  assert.equal(r.ok, true);
 });
 
 test('ungrouped leaf alongside grouped modules passes', () => {

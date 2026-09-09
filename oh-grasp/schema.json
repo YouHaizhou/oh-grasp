@@ -68,10 +68,9 @@
       "properties": {
         "id": { "type": "string", "description": "唯一标识符（稳定小写，如 grp_dispatch）。" },
         "label": { "type": "string", "description": "抽象分组名（如「命令分发」），无需对应源码标识符。" },
-        "description": { "type": "string", "description": "一句话说明这个分组做什么。" },
-        "inputSummary": { "type": "string", "description": "一句话说清流入该分组的数据（可选，折叠后显示在输入端口旁）。" },
-        "outputSummary": { "type": "string", "description": "一句话说清流出该分组的数据（可选，折叠后显示在输出端口旁）。" }
-      }
+        "description": { "type": "string", "description": "一句话说明这个分组做什么。" }
+      },
+      "description": "分组的输入/输出不在此手写——viewer 从 connections 边界边推导（见 ADR-0006）。"
     }
   }
 }

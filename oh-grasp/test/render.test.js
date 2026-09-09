@@ -56,6 +56,17 @@ test('render output contains client viewer markers', () => {
   assert.ok(html.includes('vB-tbl'), 'Index table marker present');
 });
 
+test('render ships the ADR-0007 layout system (CSS + viewer kernel)', () => {
+  const html = render(IR);
+  // 成员网格 / 子图 viewport 的 CSS
+  assert.ok(html.includes('.vA-mgrid'), 'member-grid CSS present');
+  assert.ok(html.includes('.vA-flow-sub'), 'sub-flow viewport CSS present');
+  // viewer 内核含共享布局/反馈标记（内联 JS 源码，非运行时 DOM）
+  assert.ok(html.includes('feedbackPath'), 'feedback-arc painter present');
+  assert.ok(html.includes('components('), 'WCC splitter present');
+  assert.ok(html.includes('↺'), 'feedback glyph present');
+});
+
 test('renderer script parses without syntax error', () => {
   const html = render(IR);
   const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)];
@@ -69,7 +80,7 @@ test('renderer script parses without syntax error', () => {
 const GROUPED_IR = {
   meta: IR.meta,
   groups: [
-    { id: 'grp_core', label: '核心处理', description: '解析并处理记录', inputSummary: '原始配置', outputSummary: '记录' },
+    { id: 'grp_core', label: '核心处理', description: '解析并处理记录' },
   ],
   modules: IR.modules.map((m) => (m.type === 'internal' ? { ...m, group: 'grp_core' } : { ...m })),
   connections: IR.connections,

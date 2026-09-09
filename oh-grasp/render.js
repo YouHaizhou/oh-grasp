@@ -68,9 +68,14 @@ const CSS = `
   .vA-empty { color: var(--faint); font-size: 13px; }
   .port { cursor: pointer; }
   .port:hover { fill: #6366f1; }
-  .vA-mini { display: block; width: 100%; height: auto; }
   .vA-modal-wide { width: min(820px, 100%); }
   .vA-modal-sm { width: min(420px, 100%); }
+  .vA-flow-sub { height: 320px; }
+  .vA-mgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+  .vA-mcard { display: flex; flex-direction: column; gap: 4px; text-align: left; background: var(--canvas); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; cursor: pointer; font: inherit; }
+  .vA-mcard:hover { border-color: var(--accent); }
+  .vA-mcard-name { font-family: var(--mono); font-size: 14px; font-weight: 600; }
+  .vA-mcard-desc { font-size: 12px; color: var(--muted); }
   .vA-boundary { display: flex; flex-direction: column; gap: 6px; }
   .vA-bedge { font-size: 13px; color: var(--muted); font-family: var(--mono); }
   .vA-bedge-arrow { color: var(--accent-deep); }
