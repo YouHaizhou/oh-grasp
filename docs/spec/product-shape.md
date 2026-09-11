@@ -2,7 +2,7 @@
 status: ready-for-agent
 triage-label: ready-for-agent
 route: to-tickets
-tracker: local-files (.scratch/oh-grasp/issues/)
+tracker: local-files — .scratch/oh-grasp/issues/（01 到 08，八票，本地文件未入库）
 supersedes: .scratch/oh-grasp/spec.md 的产物形态部分（story 19 已作废）
 decisions: docs/adr/0008-bilingual-artifact.md, 0009-routing-and-ports.md, 0010-unified-interaction.md, 0011-tracked-external-deps.md, 0012-algorithm-docs.md
 ---

@@ -1,0 +1,23 @@
+# 08 — 契约收紧：双语必填硬校验 + fixture 升双语 + prompt 重写
+
+**What to build:** 把宽重构的 **contract** 步做完：校验开始**硬性要求**每个可译字段的 `zh` 与 `en` 都存在且非空、`connection.description` 四段都不缺；fixture 全量升成双语；prompt 重写成能产出新形态 IR 的样子。做完这一票，用户手动重新生成产物。
+
+**⚠️ 这一票会让现有产物报错——这是预期，不是回归。** `generated/` 里那份单语 IR 从此刻起全线不通过校验，直到用户重新生成。所以它必须独立成票、排在最后，不能和任何工具链改动同批。
+
+**Blocked by:** 01、02、04、05、06
+
+**Status:** ready-for-agent
+
+- [ ] 校验：可译字段缺 `zh` 或缺 `en` → **硬报错**，错误 path 指到具体字段（不做「缺一种就回退」——静默回退会让中英混杂原样回来，那正是最初的病根）
+- [ ] 校验：`connection.description` 四段缺一 → 硬报错
+- [ ] **四段长度上限刻意不校验**（长度是 prompt 的风格指引，硬限会逼模型砍掉限定语）
+- [ ] **同 label 复用同一段文字刻意不校验**（prompt 要求，允许上下文导致的合理差异）
+- [ ] fixture 全量升双语（含 02 新增的带 group 那份）；`sample` 的单语版本升级或删除，不留一份会报错的样例
+- [ ] prompt 重写：要求双语都写；**同 label 复用同一段四段文字**；四段各一句、每段约 ≤40 字；`uses` 只列**直接**消费的 external id；`runtime` 写属性路径、不带括号、不带参数、不带说明
+- [ ] prompt 保留原有约束：「一个 import = 一个外部模块」「只读这一个文件、不追 import」「internal 模块须用源码中真实存在的标识符」
+- [ ] **自包含约束仍成立**：产物 HTML 无任何外部 `<link>` / `<script src>` / CDN / 外部字体引用（双语文案表属于查看器源码的一部分，不引入新资源）
+- [ ] `node --test` 全绿（fixture 已升级，不该再有红）
+- [ ] `docs/algorithms/rendering.md` 与 `validation.md` 同步
+
+**参考**：ADR-0008；spec 的 Further Notes「顺序约束」一节、User Stories 9–10、54–55。
+**交付后**：用户手动重新生成 `generated/` 产物（约 700 句生成量：约 166 条散文字段 × 2 语言 + 47 条 connection 的四段 × 2 语言 + 41 个模块的 `uses`/`runtime`）。
