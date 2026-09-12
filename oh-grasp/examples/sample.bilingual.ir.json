@@ -1,0 +1,97 @@
+{
+  "meta": {
+    "title": "sample-bilingual.js",
+    "subtitle": {
+      "zh": "读取并解析 JSON 配置，按配置处理记录并建立索引。",
+      "en": "Reads and parses a JSON config, then processes records and builds an index."
+    },
+    "input": [
+      { "zh": "config 文件的路径", "en": "path to the config file" }
+    ],
+    "output": [
+      { "zh": "按 id 建立的索引", "en": "an index keyed by id" }
+    ]
+  },
+  "groups": [
+    {
+      "id": "grp_io",
+      "label": { "zh": "读取与解析", "en": "Reading and parsing" },
+      "description": {
+        "zh": "把配置文件读进来，并解析成内部使用的配置对象。",
+        "en": "Reads the config file and parses it into the config object used internally."
+      }
+    }
+  ],
+  "modules": [
+    {
+      "id": "ext_fs",
+      "label": "fs",
+      "type": "external",
+      "description": { "zh": "读取配置文件", "en": "Reads the config file" },
+      "input": ["readFileSync"]
+    },
+    {
+      "id": "read_config",
+      "label": "readConfig",
+      "type": "internal",
+      "group": "grp_io",
+      "description": { "zh": "读文件并把原文交给解析", "en": "Reads the file and hands the raw text to the parser" },
+      "detail": {
+        "zh": "读取指定路径的配置文件，用 fs.readFileSync 同步读取整个文件为 UTF-8 字符串，再原样交给 parseConfig 解析。此处不做任何校验或转换。",
+        "en": "Reads the config file at the given path with fs.readFileSync as a UTF-8 string and hands it to parseConfig unchanged. No validation or conversion happens here."
+      },
+      "source": "function readConfig(path) {\n  const raw = fs.readFileSync(path, 'utf8');\n  return parseConfig(raw);\n}"
+    },
+    {
+      "id": "parse_config",
+      "label": "parseConfig",
+      "type": "internal",
+      "group": "grp_io",
+      "description": { "zh": "把原始文本解析成配置对象", "en": "Parses the raw text into a config object" },
+      "detail": {
+        "zh": "接收 readConfig 传来的原始文本，调用 JSON.parse 解析为配置对象。解析失败时异常会向上抛出，由调用方决定如何处理。",
+        "en": "Takes the raw text from readConfig and parses it with JSON.parse. A parse failure propagates up to the caller."
+      },
+      "source": "function parseConfig(raw) {\n  return JSON.parse(raw);\n}"
+    },
+    {
+      "id": "process_records",
+      "label": "processRecords",
+      "type": "internal",
+      "description": { "zh": "按配置为每条记录打上来源", "en": "Tags every record with its source from the config" },
+      "detail": {
+        "zh": "遍历 records 数组，为每条记录展开并附加 config.source 字段，生成带来源标记的新记录，供后续按来源追踪或过滤。",
+        "en": "Walks the records array, spreading each record and adding a config.source field, producing records that can later be traced or filtered by source."
+      },
+      "source": "function processRecords(records, config) {\n  return records.map(r => ({\n    ...r,\n    source: config.source,\n  }));\n}"
+    },
+    {
+      "id": "build_index",
+      "label": "buildIndex",
+      "type": "internal",
+      "description": { "zh": "按 id 建立记录索引", "en": "Builds an index of records keyed by id" },
+      "detail": {
+        "zh": "接收处理后的记录数组，以每条记录的 id 为键、记录本身为值，用 Object.fromEntries 构建查找索引，供按 id 快速取用。",
+        "en": "Takes the processed records and builds a lookup index with Object.fromEntries, keyed by each record's id, so a record can be fetched by id."
+      },
+      "source": "function buildIndex(records) {\n  return Object.fromEntries(records.map(r => [r.id, r]));\n}"
+    }
+  ],
+  "connections": [
+    {
+      "from": "read_config",
+      "to": "parse_config",
+      "label": { "zh": "配置文件原文", "en": "raw config text" }
+    },
+    {
+      "from": "parse_config",
+      "to": "process_records",
+      "label": { "zh": "解析后的配置对象", "en": "the parsed config object" }
+    },
+    {
+      "from": "process_records",
+      "to": "build_index",
+      "label": { "zh": "带来源标记的记录", "en": "records tagged with their source" }
+    }
+  ]
+}

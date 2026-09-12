@@ -44,7 +44,7 @@ JSON 里 `<` 是合法的转义目标——`<` 与 `<` 在 JSON 语义上完全�
 
 | 部分 | 来源 | 说明 |
 |---|---|---|
-| CSS | render.js 内的 `CSS` 常量 | 整块内联，无外链 |
+| CSS | render.js 内的 `CSS` 常量 | 整块内联，无外链（含 header 里的语言切换器 `.vA-lang`） |
 | 底部切换器 | 模板内联 | **待删**（ADR-0008 Q6：删 B 视图） |
 | IR | `JSON.stringify` + `<` 转义 | 放进 `<script type="application/json">` |
 | viewer | `VIEWER_SRC`（启动时 `readFileSync('viewer.js')`） | 整段内联 |
@@ -70,9 +70,11 @@ JSON 里 `<` 是合法的转义目标——`<` 与 `<` 在 JSON 语义上完全�
 
 浏览器里整段执行（两个条件都真）；Node 里 `document` 未定义，下部整段跳过，上部导出可用。
 
-**导出清单**：`fitWidth, wrap2, edgeLabel, countPorts, aggregateEdges, components, flowGeometry, gridGeometry`——即所有纯算法函数。
+**导出清单**：`fitWidth, wrap2, pick, pickList, T, tr, fmt, edgeLabel, countPorts, aggregateEdges, components, flowGeometry, gridGeometry`——即所有纯算法函数与文案表。
 
-**这条分界的价值**：`oh-grasp/test/layout.test.js` 的 15 个测试全部直接 `require('../viewer.js')`，零 DOM 依赖、毫秒级。DOM 那一层的正确性由另一套东西兜——`oh-grasp/fortest/smoke-viewer.js` 用最小 DOM 桩跑完整装载路径（见下）。
+**语言怎么进去**：语言**不是**内核状态，而是参数。`pick(field, lang)` 收口全部散文字段（`{zh, en}` 按语言取值，旧形态的普通字符串原样返回），`edgeLabel(e, lang)`、`nodeSvg(id, x, y, counts, lang)`、`flowSvg(ids, edges, counts, lang)` 逐层把它传下去。DOM 应用把当前语言放在 `state.lang`（不持久化），点 header 的 `#langZh` / `#langEn` 就换值并整页重渲染。`T = {zh, en}` 是查看器固定文案表（输入/输出/依赖/内部数据流/边界数据流/GROUP/INTERNAL/空方向「—」/弹窗分节标题/提示行），`tr(lang, key)` 取它，`fmt(tpl, n)` 填 `{n}` 占位——它在内核里，因此「两种语言的键一一对应」可单测。
+
+**这条分界的价值**：`oh-grasp/test/layout.test.js` 的 25 个测试全部直接 `require('../viewer.js')`，零 DOM 依赖、毫秒级。DOM 那一层的正确性由另一套东西兜——`oh-grasp/fortest/smoke-viewer.js` 用最小 DOM 桩跑完整装载路径（见下）。
 
 **位置**：viewer.js:285（分界）、viewer.js:733（导出）。
 

@@ -59,6 +59,18 @@
 
 ---
 
+## 4. 可译字段的两种形态（expand 步）
+
+**问题**：说明性文字要能中英切换，IR 里的**散文**字段（`meta.subtitle` / `meta.input` / `meta.output` / `group.label` / `group.description` / `module.description` / `module.detail` / `connection.label`）从 `string` 变成 `{zh, en}`。但 `generated/` 里那份**单语**产物还得继续能校验、能渲染。
+
+**做法**：`isTranslatable(x) = 非空字符串 || （对象且 zh/en 至少一个非空）`，列表形态用 `isTranslatableArray`（逐项判）。`module.label` / `id` / `source` / `from` / `to` **不走这条**，它们永远是 `string`——名字译了就对不上源码，本文件 #2 的存在性检查也会立刻失效。
+
+**为什么只到「至少一种语言」**：这是 expand 步，只放宽不收口。「`zh` 与 `en` 都必填」是契约步的硬校验，两条刻意分开落地——`validate` 一收紧，`generated/` 里现有的单语 IR 就全线报错，而重新生成是用户手动做的，在实现之后。中间那段窗口里分不清「校验写错了」和「产物还没更新」。
+
+**位置**：validate.js 顶部的 `isTranslatable` / `isTranslatableArray`。
+
+---
+
 ## 错误报告契约
 
 ```

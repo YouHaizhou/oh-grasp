@@ -34,8 +34,14 @@ const CSS = `
   /* ===== A · Flow ===== */
   .vA { max-width: 1060px; margin: 0 auto; padding: 40px 28px; }
   .vA-head { margin-bottom: 24px; }
+  .vA-headrow { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .vA-headmain { min-width: 0; }
   .vA-title { font-family: var(--mono); font-size: 26px; font-weight: 700; margin: 0 0 6px; }
   .vA-sub { font-size: 15px; color: var(--muted); margin: 0 0 18px; }
+  .vA-lang { display: flex; gap: 2px; flex: none; background: var(--canvas); border: 1px solid var(--border); border-radius: 999px; padding: 3px; }
+  .vA-lang-btn { border: none; background: none; font: inherit; font-size: 12px; line-height: 1; padding: 6px 11px; border-radius: 999px; cursor: pointer; color: var(--muted); }
+  .vA-lang-btn:hover { color: var(--text); }
+  .vA-lang-btn.sel { background: var(--accent); color: #fff; }
   .vA-io { display: flex; flex-wrap: wrap; gap: 10px; }
   .vA-io .group { display: flex; align-items: center; gap: 8px; }
   .vA-io .cap { font-size: 12px; color: var(--faint); letter-spacing: .04em; }

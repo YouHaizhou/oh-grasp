@@ -312,3 +312,89 @@ test('groups not an array fails', () => {
   const r = validate(ir);
   assert.ok(r.errors.some((e) => e.path === 'groups'));
 });
+
+// === 双语（expand 步：新旧两种形态都收，不做「两种语言都必填」的收紧） ===
+const BI_IR = require('../examples/sample.bilingual.ir.json');
+
+test('bilingual IR passes validation', () => {
+  const r = validate(BI_IR);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.errors, []);
+});
+
+test('monolingual IR keeps passing next to the bilingual one', () => {
+  // 旧产物（散文字段全是普通字符串）不受影响 —— expand 步的兼容保证。
+  const r = validate(validIR());
+  assert.equal(r.ok, true);
+});
+
+test('every prose field accepts {zh,en}', () => {
+  const ir = validGroupedIR();
+  ir.meta.subtitle = { zh: '解析并处理记录', en: 'Parses and processes records' };
+  ir.meta.input = [{ zh: '配置路径', en: 'config path' }];
+  ir.meta.output = [{ zh: '记录', en: 'records' }];
+  ir.groups[0].label = { zh: '核心处理', en: 'Core processing' };
+  ir.groups[0].description = { zh: '解析并处理记录', en: 'Parses and processes records' };
+  ir.modules[1].description = { zh: '解析配置', en: 'Parses the config' };
+  ir.modules[1].detail = { zh: '把原文解析成对象。', en: 'Parses the raw text into an object.' };
+  ir.connections[0].label = { zh: '配置对象', en: 'config object' };
+  const r = validate(ir);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.errors, []);
+});
+
+test('a prose field with only one language is tolerated (tightening is the contract step)', () => {
+  const ir = validIR();
+  ir.meta.subtitle = { zh: '只有中文' };
+  ir.modules[1].description = { en: 'english only' };
+  const r = validate(ir);
+  assert.equal(r.ok, true);
+});
+
+test('an empty prose object fails with a precise path', () => {
+  const ir = validGroupedIR();
+  ir.groups[0].description = {};
+  ir.modules[1].detail = { zh: '  ', en: '' };
+  ir.connections[0].label = {};
+  ir.meta.subtitle = { zh: '', en: '' };
+  const r = validate(ir);
+  assert.ok(r.errors.some((e) => e.path === 'groups[0].description'));
+  assert.ok(r.errors.some((e) => e.path === 'modules[1].detail'));
+  assert.ok(r.errors.some((e) => e.path === 'connections[0].label'));
+  assert.ok(r.errors.some((e) => e.path === 'meta.subtitle'));
+});
+
+test('non-prose items in meta.input still have to be strings or {zh,en}', () => {
+  const ir = validIR();
+  ir.meta.input = [42];
+  const r = validate(ir);
+  assert.ok(r.errors.some((e) => e.path === 'meta.input'));
+});
+
+test('meta.input accepts a plain string item even when empty (expand step does not tighten)', () => {
+  // 数组项走的是比标量字段更宽的判据：旧 isStrArray 对普通字符串一律放行，空串也放行。
+  // 一旦顺手改用 isTranslatable，校验就被悄悄收紧了——这条把那个边界钉住。
+  const ir = validIR();
+  ir.meta.input = ['', 'ok'];
+  assert.ok(validate(ir).ok);
+  // 但空的 {zh,en} 对象项仍然拒——宽容只给旧形态的普通字符串。
+  ir.meta.input = [{}];
+  assert.ok(validate(ir).errors.some((e) => e.path === 'meta.input'));
+});
+
+test('module labels stay string-only: names are never translated', () => {
+  // 名字（源码标识符 / 包名）译了就对不上代码，validate 的存在性检查也会立刻失效。
+  const ir = validIR();
+  ir.modules[1].label = { zh: '解析配置', en: 'parseConfig' };
+  ir.modules[0].label = { zh: '文件系统', en: 'fs' };
+  const r = validate(ir, SOURCE);
+  assert.ok(r.errors.some((e) => e.path === 'modules[1].label'));
+  assert.ok(r.errors.some((e) => e.path === 'modules[0].label'));
+});
+
+test('internal module source is still copied verbatim, not a {zh,en} pair', () => {
+  const ir = validIR();
+  ir.modules[1].source = { zh: 'function parseConfig(raw) {}', en: 'function parseConfig(raw) {}' };
+  const r = validate(ir, SOURCE);
+  assert.ok(r.errors.some((e) => e.path === 'modules[1].source'));
+});

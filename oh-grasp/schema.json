@@ -11,10 +11,10 @@
       "description": "文件级元信息：标题（文件名）、副标题（作用）、输入、输出。",
       "required": ["title", "subtitle", "input", "output"],
       "properties": {
-        "title": { "type": "string", "description": "文件名（含扩展名）。" },
-        "subtitle": { "type": "string", "description": "一句话说清这个文件是干什么的。" },
-        "input": { "type": "array", "items": { "type": "string" }, "description": "文件的输入，数组，可为空。" },
-        "output": { "type": "array", "items": { "type": "string" }, "description": "文件的输出，数组，可为空。" }
+        "title": { "type": "string", "description": "文件名（含扩展名）。名字，不译。" },
+        "subtitle": { "$ref": "#/definitions/translatable", "description": "一句话说清这个文件是干什么的。" },
+        "input": { "type": "array", "items": { "$ref": "#/definitions/translatable" }, "description": "文件的输入，数组，可为空。" },
+        "output": { "type": "array", "items": { "$ref": "#/definitions/translatable" }, "description": "文件的输出，数组，可为空。" }
       }
     },
     "modules": {
@@ -37,7 +37,7 @@
         "properties": {
           "from": { "type": "string", "description": "源内部模块 id。" },
           "to": { "type": "string", "description": "目标内部模块 id。" },
-          "label": { "type": "string", "description": "流动的数据或含义。" }
+          "label": { "$ref": "#/definitions/translatable", "description": "流动的数据或含义（散文，可译）。" }
         }
       }
     }
@@ -48,10 +48,10 @@
       "required": ["id", "label", "type", "description"],
       "properties": {
         "id": { "type": "string", "description": "唯一标识符（稳定的小写标识符，如 ext_react、parse_config）。" },
-        "label": { "type": "string", "description": "模块名。internal 模块须用源码中真实存在的标识符。" },
+        "label": { "type": "string", "description": "模块名（名字，不译）。internal 模块须用源码中真实存在的标识符；external 模块是包名。" },
         "type": { "enum": ["external", "internal"] },
-        "description": { "type": "string", "description": "一句话说明职责/为什么需要它。" },
-        "detail": { "type": "string", "description": "仅 internal 模块：更完整的职责说明（弹窗里显示，比 description 长）。" },
+        "description": { "$ref": "#/definitions/translatable", "description": "一句话说明职责/为什么需要它。" },
+        "detail": { "$ref": "#/definitions/translatable", "description": "仅 internal 模块：更完整的职责说明（弹窗里显示，比 description 长）。" },
         "source": { "type": "string", "description": "仅 internal 模块：该模块的完整函数体原文（弹窗里显示，从源文件原文摘出，勿只给声明行）。" },
         "sourceLine": { "type": "integer", "description": "仅 internal 模块：source 在源文件中的起始行号（可选，仅校验为整数，不校验行号值是否正确）。" },
         "group": { "type": "string", "description": "仅 internal 模块：所属分组的 id（可选，引用 groups[] 里的 id；留空表示单飞叶子）。" },
@@ -67,10 +67,24 @@
       "required": ["id", "label", "description"],
       "properties": {
         "id": { "type": "string", "description": "唯一标识符（稳定小写，如 grp_dispatch）。" },
-        "label": { "type": "string", "description": "抽象分组名（如「命令分发」），无需对应源码标识符。" },
-        "description": { "type": "string", "description": "一句话说明这个分组做什么。" }
+        "label": { "$ref": "#/definitions/translatable", "description": "抽象分组名（如「命令分发」），无需对应源码标识符。是散文，可译。" },
+        "description": { "$ref": "#/definitions/translatable", "description": "一句话说明这个分组做什么。" }
       },
       "description": "分组的输入/输出不在此手写——viewer 从 connections 边界边推导（见 ADR-0006）。"
+    },
+    "translatable": {
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "object",
+          "properties": {
+            "zh": { "type": "string" },
+            "en": { "type": "string" }
+          },
+          "description": "语言在外：{ \"zh\": …, \"en\": … }。两种语言是否都必填由校验脚本决定。"
+        }
+      ],
+      "description": "可译散文字段。旧形态：普通字符串（单语产物）。新形态：{zh, en}。名字（module.label / id / source / from / to / file 名）不用此定义，它们永远是 string。"
     }
   }
 }

@@ -93,3 +93,40 @@ test('grouped IR round-trips through render', () => {
   const parsed = JSON.parse(m[1]);
   assert.deepEqual(parsed, GROUPED_IR);
 });
+
+// ---- 双语 fixture（expand 步：{zh,en} 与普通字符串并存） ----
+const BI_IR = require('../examples/sample.bilingual.ir.json');
+
+test('bilingual IR round-trips through render', () => {
+  const html = render(BI_IR);
+  const m = html.match(/<script[^>]*type="application\/json"[^>]*>([\s\S]*?)<\/script>/);
+  assert.ok(m, 'embedded IR script block exists');
+  assert.deepEqual(JSON.parse(m[1]), BI_IR);
+});
+
+test('render output carries the language switcher', () => {
+  const html = render(BI_IR);
+  assert.ok(html.includes('id="langZh"'), '中文按钮在产物里');
+  assert.ok(html.includes('id="langEn"'), 'EN 按钮在产物里');
+  assert.ok(html.includes('.vA-lang-btn'), '切换器样式在产物里');
+  assert.ok(!/localStorage/.test(html), '语言不记忆：产物里不出现 localStorage');
+});
+
+test('both languages of the prose are embedded in the artifact', () => {
+  const html = render(BI_IR);
+  assert.ok(html.includes('读取并解析 JSON 配置'), '中文副标题在产物里');
+  assert.ok(html.includes('Reads and parses a JSON config'), '英文副标题在产物里');
+  assert.ok(html.includes('读取与解析'), '中文分组名在产物里');
+  assert.ok(html.includes('Reading and parsing'), '英文分组名在产物里');
+  assert.ok(html.includes('配置文件原文'), '中文连线 label 在产物里');
+  assert.ok(html.includes('raw config text'), '英文连线 label 在产物里');
+  // 名字不译：两种语言下都只有原样的源码标识符 / 包名
+  assert.ok(html.includes('readConfig') && html.includes('"fs"'), '模块名与包名原样保留');
+});
+
+test('bilingual artifact is self-contained too', () => {
+  const html = render(BI_IR);
+  assert.ok(!/<link\b/i.test(html), 'no external <link>');
+  assert.ok(!/<script\b[^>]*\bsrc\s*=/i.test(html), 'no external <script src>');
+  assert.ok(!/url\(\s*["']?https?:/i.test(html), 'no remote url()');
+});

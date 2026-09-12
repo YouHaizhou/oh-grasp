@@ -59,6 +59,60 @@
     return out;
   }
 
+  /* ---------- 双语取值：收敛全部「散文」字段的读取 ----------
+     语言在外：可译字段是 {zh, en}；旧形态的普通字符串原样返回 —— expand 步下
+     单语产物照常渲染。语言一律由调用方传进来（参数），内核不持有语言状态。 */
+  var LANGS = ['zh', 'en'];
+  var DEFAULT_LANG = 'zh';
+  function normLang(lang) { return LANGS.indexOf(lang) !== -1 ? lang : DEFAULT_LANG; }
+  // 语言子树里「有内容」的判据与 validate 一致：空白不算内容。
+  function hasText(x) { return typeof x === 'string' && x.trim() !== ''; }
+  // field: string（旧形态，原样返回）| {zh, en}（按语言取值）。
+  function pick(field, lang) {
+    if (typeof field === 'string') return field;
+    if (!field || typeof field !== 'object') return '';
+    var l = normLang(lang);
+    if (hasText(field[l])) return field[l];
+    if (hasText(field[DEFAULT_LANG])) return field[DEFAULT_LANG];   // 缺当前语言时回退默认语言
+    return hasText(field.en) ? field.en : '';
+  }
+  // 列表形态的可译字段（meta.input / meta.output）：逐项 pick。
+  function pickList(arr, lang) {
+    if (!Array.isArray(arr)) return [];
+    return arr.map(function (x) { return pick(x, lang); }).filter(function (s) { return s !== ''; });
+  }
+
+  /* ---------- 查看器固定 UI 文案（不属于 IR，跟着语言切换） ---------- */
+  var T = {
+    zh: {
+      input: '输入', output: '输出',
+      deps: '依赖 Dependencies',
+      hint: '点击模块/分组查看详情 · 滚轮缩放（光标为锚点）· 拖拽平移 · 双击复位 · 虚线 ↺ 为反向/反馈连接',
+      source: '源码 Source', line: '第 {n} 行',
+      groupMeta: 'group · {n} 模块',
+      innerFlow: '内部数据流', boundary: '边界数据流', members: '成员模块',
+      none: '无', dash: '—', feedback: '反馈',
+      groupTag: 'GROUP', internalTag: 'INTERNAL',
+    },
+    en: {
+      input: 'Input', output: 'Output',
+      deps: 'Dependencies',
+      hint: 'Click a module / group for details · scroll to zoom (cursor-anchored) · drag to pan · double-click to reset · dashed ↺ = feedback connection',
+      source: 'Source', line: 'line {n}',
+      groupMeta: 'group · {n} modules',
+      innerFlow: 'Internal data flow', boundary: 'Boundary data flow', members: 'Member modules',
+      none: 'None', dash: '—', feedback: 'feedback',
+      groupTag: 'GROUP', internalTag: 'INTERNAL',
+    }
+  };
+  // 取当前语言的 UI 文案；语言非法时按 zh。
+  function tr(lang, key) {
+    var tbl = T[normLang(lang)];
+    return tbl[key] !== undefined ? tbl[key] : T[DEFAULT_LANG][key];
+  }
+  // 文案里的 {n} 占位替换（如「第 {n} 行」）。
+  function fmt(tpl, n) { return String(tpl).replace('{n}', n); }
+
   /* ---------- 几何常量（节点盒） ---------- */
   var CW = 236, CH = 78;                     // leaf 宽 / 高（内容恒定：名字 + ≤2 行描述）
   var GW = 282, GH = 96;                     // group 宽 / 高（上下端口占位，比 leaf 高）
@@ -81,11 +135,11 @@
     return c;
   }
 
-  /* ---------- 边 label 聚合 ---------- */
-  function edgeLabel(e) {
+  /* ---------- 边 label 聚合（label 是可译散文，按语言取值后去重） ---------- */
+  function edgeLabel(e, lang) {
     var seen = [];
     (e.conns || []).forEach(function (cn) {
-      var l = cn && cn.label ? String(cn.label) : '';
+      var l = cn ? pick(cn.label, lang) : '';
       if (l && seen.indexOf(l) === -1) seen.push(l);
     });
     if (!seen.length) return '';
@@ -290,22 +344,32 @@
       var G = {};
       (ir.groups || []).forEach(function (g) { G[g.id] = g; });
 
+  // 语言是阅读偏好，不做持久化，每次打开都是默认中文。
+  var state = { lang: DEFAULT_LANG };
+  // 切语言 = 换一个取值子树，立刻重渲染；非法语言忽略。
+  function setLang(lang) {
+    if (LANGS.indexOf(lang) === -1 || state.lang === lang) return;
+    state.lang = lang;
+    render();
+  }
+
   /* ---------- 节点盒 ---------- */
-  // counts: { id: {in,out} }，仅 group 用（×N 端口标）。
-  function nodeSvg(id, x, y, counts) {
+  // counts: { id: {in,out} }，仅 group 用（×N 端口标）。lang: 'zh' | 'en'。
+  function nodeSvg(id, x, y, counts, lang) {
     var isGrp = !!G[id], m = M[id], g = G[id];
     var w = isGrp ? GW : CW, h = isGrp ? GH : CH;
-    var name = isGrp ? g.label : m.label;
-    var desc = isGrp ? g.description : m.description;
+    // group.label 是模型起的抽象名（可译）；模块 label 是源码标识符 / 包名（绝不译）。
+    var name = isGrp ? pick(g.label, lang) : m.label;
+    var desc = pick(isGrp ? g.description : m.description, lang);
     var nameFs = 14, descFs = 12;
     var maxW = w - 34;
     var s = '';
     if (isGrp) {
       s += '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="12" fill="#eef2ff" stroke="#c7d2fe" stroke-width="1"/>';
-      s += '<text x="' + (x + 16) + '" y="' + (y + 18) + '" font-size="8.5" letter-spacing="1.5" fill="#6366f1">GROUP</text>';
+      s += '<text x="' + (x + 16) + '" y="' + (y + 18) + '" font-size="8.5" letter-spacing="1.5" fill="#6366f1">' + esc(tr(lang, 'groupTag')) + '</text>';
     } else {
       s += '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="10" fill="#ffffff" stroke="#cbd5e1" stroke-width="1"/>';
-      s += '<text x="' + (x + 16) + '" y="' + (y + 18) + '" font-size="8.5" letter-spacing="1.5" fill="#9aa3b2">INTERNAL</text>';
+      s += '<text x="' + (x + 16) + '" y="' + (y + 18) + '" font-size="8.5" letter-spacing="1.5" fill="#9aa3b2">' + esc(tr(lang, 'internalTag')) + '</text>';
     }
     s += '<text x="' + (x + 16) + '" y="' + (y + 34) + '" font-size="' + nameFs + '" font-weight="600" fill="#1a202c"' +
       (isGrp ? '' : ' font-family="monospace"') + '>' + esc(fitWidth(name, nameFs, maxW)) + '</text>';
@@ -358,7 +422,7 @@
   /* ---------- 合成一张完整 flow svg（顶层与子图共用同一内核） ---------- */
   // ids: 单元 id 数组；edges: 已聚合的 {from,to,conns}（子图 conns 长度 1）；
   // counts: 端口 ×N；返回 {svg,W,H,hasBack}。
-  function flowSvg(ids, edges, counts) {
+  function flowSvg(ids, edges, counts, lang) {
     var size = function (id) { return G[id] ? { w: GW, h: GH } : { w: CW, h: CH }; };
     var comps = components(ids, edges);
     var flowComps = comps.filter(function (c) { return c.edges.length > 0; });
@@ -411,8 +475,8 @@
         var a = g.pos[e.from], b = g.pos[e.to];
         if (!a || !b) return;
         var pa = feedbackPath(a, b, g.sizes[e.from], g.sizes[e.to], g.gx);
-        var lbl = edgeLabel(e);
-        if (!lbl) lbl = '反馈';
+        var lbl = edgeLabel(e, lang);
+        if (!lbl) lbl = tr(lang, 'feedback');
         part += '<path d="' + pa.d + '" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#' + mB.id + ')"/>';
         part += '<text x="' + (g.Wc + g.lane - 10) + '" y="' + pa.mid + '" text-anchor="end" font-size="10" fill="#b45309">↺ ' + esc(fitWidth(lbl, 10, g.lane - 26)) + '</text>';
       });
@@ -422,7 +486,7 @@
         if (!a || !b) return;
         var p = fwdPath(a, b, g.sizes[e.from], g.sizes[e.to]);
         part += '<path d="' + p.d + '" fill="none" stroke="#b6c2d1" stroke-width="1.5" marker-end="url(#' + mF.id + ')"/>';
-        var lbl = edgeLabel(e);
+        var lbl = edgeLabel(e, lang);
         if (lbl) part += haloText(fitWidth(lbl, 11, 240), p.xm, p.my - 4, 'middle');
       });
       // 节点（盖住边端点与箭头根部）
@@ -430,7 +494,7 @@
         row.forEach(function (id) {
           var p = g.pos[id];
           var kind = G[id] ? 'group' : 'internal';
-          part += '<g class="node" data-id="' + esc(id) + '" data-kind="' + kind + '">' + nodeSvg(id, p.x, p.y, counts) + '</g>';
+          part += '<g class="node" data-id="' + esc(id) + '" data-kind="' + kind + '">' + nodeSvg(id, p.x, p.y, counts, lang) + '</g>';
         });
       });
       body += '<g transform="translate(0,' + g.top + ')">' + part + '</g>';
@@ -441,7 +505,7 @@
         row.forEach(function (id) {
           var p = grid.pos[id];
           var kind = G[id] ? 'group' : 'internal';
-          gpart += '<g class="node" data-id="' + esc(id) + '" data-kind="' + kind + '">' + nodeSvg(id, p.x, p.y, counts) + '</g>';
+          gpart += '<g class="node" data-id="' + esc(id) + '" data-kind="' + kind + '">' + nodeSvg(id, p.x, p.y, counts, lang) + '</g>';
         });
       });
       body += '<g transform="translate(' + ((contentW - grid.W) / 2) + ',' + grid.top + ')">' + gpart + '</g>';
@@ -506,21 +570,31 @@
 
   /* ============ A · Flow ============ */
   function renderA(root) {
-    var io = function (arr) { return (arr || []).map(function (t) { return '<span class="chip">' + esc(t) + '</span>'; }).join(''); };
+    var lang = state.lang;
+    var io = function (arr) { return pickList(arr, lang).map(function (t) { return '<span class="chip">' + esc(t) + '</span>'; }).join(''); };
     var ext = ir.modules.filter(function (m) { return m.type === 'external'; });
     var head =
       '<header class="vA-head">' +
+      '<div class="vA-headrow">' +
+      '<div class="vA-headmain">' +
       '<h1 class="vA-title">' + esc(ir.meta.title) + '</h1>' +
-      '<p class="vA-sub">' + esc(ir.meta.subtitle) + '</p>' +
+      '<p class="vA-sub">' + esc(pick(ir.meta.subtitle, lang)) + '</p>' +
+      '</div>' +
+      // 语言切换器：标题右侧，默认中文、不记忆（每次打开都是 zh）。
+      '<div class="vA-lang" role="group" aria-label="Language">' +
+      '<button type="button" class="vA-lang-btn' + (lang === 'zh' ? ' sel' : '') + '" id="langZh" data-lang="zh">中文</button>' +
+      '<button type="button" class="vA-lang-btn' + (lang === 'en' ? ' sel' : '') + '" id="langEn" data-lang="en">EN</button>' +
+      '</div>' +
+      '</div>' +
       '<div class="vA-io">' +
-      '<div class="group"><span class="cap">输入</span>' + io(ir.meta.input) + '</div>' +
-      '<div class="group"><span class="cap">输出</span>' + io(ir.meta.output) + '</div>' +
+      '<div class="group"><span class="cap">' + esc(tr(lang, 'input')) + '</span>' + io(ir.meta.input) + '</div>' +
+      '<div class="group"><span class="cap">' + esc(tr(lang, 'output')) + '</span>' + io(ir.meta.output) + '</div>' +
       '</div></header>';
     var extRail =
-      '<aside class="vA-ext"><div class="vA-sec">依赖 Dependencies</div>' +
+      '<aside class="vA-ext"><div class="vA-sec">' + esc(tr(lang, 'deps')) + '</div>' +
       ext.map(function (m) {
         return '<div class="vA-extcard"><div class="vA-extname">' + esc(m.label) + '</div>' +
-          '<div class="vA-extdesc">' + esc(m.description) + '</div>' +
+          '<div class="vA-extdesc">' + esc(pick(m.description, lang)) + '</div>' +
           '<div class="vA-extuse">↳ ' + esc((m.input || []).join(', ')) + '</div></div>';
       }).join('') + '</aside>';
 
@@ -546,10 +620,10 @@
     });
     var counts = countPorts(topEdges);
 
-    var flow = flowSvg(units, topEdges, counts);
+    var flow = flowSvg(units, topEdges, counts, lang);
 
     root.innerHTML = '<div class="vA">' + head + '<div class="vA-body">' + extRail + '<main class="vA-main">' +
-      '<div class="vA-hint">点击模块/分组查看详情 · 滚轮缩放（光标为锚点）· 拖拽平移 · 双击复位 · 虚线 ↺ 为反向/反馈连接</div>' +
+      '<div class="vA-hint">' + esc(tr(lang, 'hint')) + '</div>' +
       '<div class="vA-flow" id="flowViewport"><div class="vA-zoom" id="zoomTarget">' + flow.svg + '</div><div class="vA-zoom-badge" id="zoomBadge">100%</div></div>' +
       '</main></div><div class="vA-overlay" id="detailOverlay"></div></div>';
 
@@ -561,13 +635,15 @@
       detail.classList.remove('open');
       root.querySelectorAll('.node').forEach(function (g) { g.classList.remove('sel'); });
     }
+    // 顶层单元的显示名：group 抽象名可译，模块名不译。
+    function unitName(id) { return G[id] ? pick(G[id].label, lang) : M[id].label; }
     function openDetail(id) {
       var m = M[id];
       detail.innerHTML =
         '<div class="vA-modal">' +
         '<div class="vA-detail-head"><span class="vA-detail-name">' + esc(m.label) + '</span><span class="vA-detail-kind">internal</span><button class="vA-detail-close" id="detailClose">×</button></div>' +
-        '<p class="vA-detail-desc">' + esc(m.detail || m.description) + '</p>' +
-        (m.source ? '<h4>源码 Source' + (typeof m.sourceLine === 'number' ? ' · 第 ' + m.sourceLine + ' 行' : '') + '</h4><pre class="vA-src"><code>' + esc(m.source) + '</code></pre>' : '') +
+        '<p class="vA-detail-desc">' + esc(pick(m.detail || m.description, lang)) + '</p>' +
+        (m.source ? '<h4>' + esc(tr(lang, 'source')) + (typeof m.sourceLine === 'number' ? ' · ' + esc(fmt(tr(lang, 'line'), m.sourceLine)) : '') + '</h4><pre class="vA-src"><code>' + esc(m.source) + '</code></pre>' : '') +
         '</div>';
       detail.classList.add('open');
       root.querySelectorAll('.node').forEach(function (g) { g.classList.toggle('sel', g.dataset.id === id); });
@@ -587,11 +663,11 @@
       if (inner.length) {
         var innerEdges = aggregateEdges(inner);
         var ids = members.map(function (m) { return m.id; });
-        var sub = flowSvg(ids, innerEdges, null);
+        var sub = flowSvg(ids, innerEdges, null, lang);
         body = '<div class="vA-flow vA-flow-sub" id="subViewport"><div class="vA-zoom" id="subZoom">' + sub.svg + '</div></div>';
         var modal = '<div class="vA-modal vA-modal-wide">';
-        modal += '<div class="vA-detail-head"><span class="vA-detail-name">' + esc(g.label) + '</span><span class="vA-detail-kind">group · ' + members.length + ' 模块</span><button class="vA-detail-close" id="detailClose">×</button></div>';
-        modal += '<p class="vA-detail-desc">' + esc(g.description) + '</p><h4>内部数据流</h4>' + body;
+        modal += '<div class="vA-detail-head"><span class="vA-detail-name">' + esc(pick(g.label, lang)) + '</span><span class="vA-detail-kind">' + esc(fmt(tr(lang, 'groupMeta'), members.length)) + '</span><button class="vA-detail-close" id="detailClose">×</button></div>';
+        modal += '<p class="vA-detail-desc">' + esc(pick(g.description, lang)) + '</p><h4>' + esc(tr(lang, 'innerFlow')) + '</h4>' + body;
         modal += boundaryBlock(boundary, memberIds);
         modal += '</div>';
         detail.innerHTML = modal;
@@ -606,11 +682,11 @@
         });
       } else {
         var cards = members.map(function (m) {
-          return '<button class="vA-mcard" data-id="' + esc(m.id) + '" type="button"><span class="vA-mcard-name">' + esc(m.label) + '</span><span class="vA-mcard-desc">' + esc(m.description) + '</span></button>';
+          return '<button class="vA-mcard" data-id="' + esc(m.id) + '" type="button"><span class="vA-mcard-name">' + esc(m.label) + '</span><span class="vA-mcard-desc">' + esc(pick(m.description, lang)) + '</span></button>';
         }).join('');
         detail.innerHTML = '<div class="vA-modal vA-modal-wide">' +
-          '<div class="vA-detail-head"><span class="vA-detail-name">' + esc(g.label) + '</span><span class="vA-detail-kind">group · ' + members.length + ' 模块</span><button class="vA-detail-close" id="detailClose">×</button></div>' +
-          '<p class="vA-detail-desc">' + esc(g.description) + '</p><h4>成员模块</h4><div class="vA-mgrid">' + cards + '</div>' +
+          '<div class="vA-detail-head"><span class="vA-detail-name">' + esc(pick(g.label, lang)) + '</span><span class="vA-detail-kind">' + esc(fmt(tr(lang, 'groupMeta'), members.length)) + '</span><button class="vA-detail-close" id="detailClose">×</button></div>' +
+          '<p class="vA-detail-desc">' + esc(pick(g.description, lang)) + '</p><h4>' + esc(tr(lang, 'members')) + '</h4><div class="vA-mgrid">' + cards + '</div>' +
           boundaryBlock(boundary, memberIds) +
           '</div>';
         detail.classList.add('open');
@@ -625,13 +701,13 @@
         var self = memberIds[c.from] ? M[c.from] : M[c.to];
         var other = memberIds[c.from] ? M[c.to] : M[c.from];
         var dir = memberIds[c.from] ? '→' : '←';
-        return '<div class="vA-bedge"><span class="vA-pp-mod">' + esc(self.label) + '</span> <span class="vA-bedge-arrow">' + dir + '</span> <span class="vA-bedge-lab">' + esc(c.label) + '</span> <span class="vA-bedge-arrow">' + dir + '</span> <span class="vA-pp-mod">' + esc(other.label) + '</span></div>';
+        return '<div class="vA-bedge"><span class="vA-pp-mod">' + esc(unitName(self.id)) + '</span> <span class="vA-bedge-arrow">' + dir + '</span> <span class="vA-bedge-lab">' + esc(pick(c.label, lang)) + '</span> <span class="vA-bedge-arrow">' + dir + '</span> <span class="vA-pp-mod">' + esc(unitName(other.id)) + '</span></div>';
       }).join('');
     }
     function boundaryBlock(boundary, memberIds) {
-      if (boundary.length) return '<h4>边界数据流</h4><div class="vA-boundary">' + bedgeHtml(boundary, memberIds) + '</div>';
+      if (boundary.length) return '<h4>' + esc(tr(lang, 'boundary')) + '</h4><div class="vA-boundary">' + bedgeHtml(boundary, memberIds) + '</div>';
       // ADR-0006：无组间边时，输入/输出显示「—」而不是留空区/空端口。
-      return '<h4>边界数据流</h4><div class="vA-empty">输入 — · 输出 —</div>';
+      return '<h4>' + esc(tr(lang, 'boundary')) + '</h4><div class="vA-empty">' + esc(tr(lang, 'input')) + ' ' + esc(tr(lang, 'dash')) + ' · ' + esc(tr(lang, 'output')) + ' ' + esc(tr(lang, 'dash')) + '</div>';
     }
     function openPort(id, kind) {
       var conns = [];
@@ -639,14 +715,18 @@
         if ((kind === 'in' && e.to === id) || (kind === 'out' && e.from === id)) conns = conns.concat(e.conns);
       });
       var rows = conns.map(function (c) {
-        return '<div class="vA-pp-row"><span class="vA-pp-mod">' + esc(M[c.from].label) + '</span><span class="vA-pp-arrow">→</span><span class="vA-pp-lab">' + esc(c.label) + '</span><span class="vA-pp-arrow">→</span><span class="vA-pp-mod">' + esc(M[c.to].label) + '</span></div>';
+        return '<div class="vA-pp-row"><span class="vA-pp-mod">' + esc(unitName(c.from)) + '</span><span class="vA-pp-arrow">→</span><span class="vA-pp-lab">' + esc(pick(c.label, lang)) + '</span><span class="vA-pp-arrow">→</span><span class="vA-pp-mod">' + esc(unitName(c.to)) + '</span></div>';
       }).join('');
       detail.innerHTML = '<div class="vA-modal vA-modal-sm">' +
-        '<div class="vA-detail-head"><span class="vA-detail-name">' + (kind === 'in' ? '输入' : '输出') + '</span><span class="vA-detail-kind">' + esc((G[id] || M[id]).label) + '</span><button class="vA-detail-close" id="detailClose">×</button></div>' +
-        (rows || '<div class="vA-empty">无</div>') + '</div>';
+        '<div class="vA-detail-head"><span class="vA-detail-name">' + esc(kind === 'in' ? tr(lang, 'input') : tr(lang, 'output')) + '</span><span class="vA-detail-kind">' + esc(unitName(id)) + '</span><button class="vA-detail-close" id="detailClose">×</button></div>' +
+        (rows || '<div class="vA-empty">' + esc(tr(lang, 'none')) + '</div>') + '</div>';
       detail.classList.add('open');
       detail.querySelector('#detailClose').addEventListener('click', closeDetail);
     }
+    // 语言切换器：立即生效（整页重渲染），不记忆。
+    var zhBtn = root.querySelector('#langZh'), enBtn = root.querySelector('#langEn');
+    if (zhBtn) zhBtn.addEventListener('click', function () { setLang('zh'); });
+    if (enBtn) enBtn.addEventListener('click', function () { setLang('en'); });
     detail.addEventListener('click', function (e) { if (e.target === detail) closeDetail(); });
     root.querySelectorAll('.node').forEach(function (g) {
       g.addEventListener('click', function () {
@@ -733,6 +813,7 @@
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
       fitWidth: fitWidth, wrap2: wrap2,
+      pick: pick, pickList: pickList, T: T, tr: tr, fmt: fmt,
       edgeLabel: edgeLabel, countPorts: countPorts,
       aggregateEdges: aggregateEdges,
       components: components, flowGeometry: flowGeometry, gridGeometry: gridGeometry,

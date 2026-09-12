@@ -7,6 +7,17 @@ function validate(ir, source) {
   const isObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
   const isNonEmptyStr = (x) => typeof x === 'string' && x.trim() !== '';
   const isStrArray = (x) => Array.isArray(x) && x.every((s) => typeof s === 'string');
+  // 可译「散文」字段（meta.subtitle / group.label / module.description / connection.label…）：
+  // 旧形态是普通字符串，新形态是 {zh, en}（语言在外）。expand 步只要求「至少一种语言非空」；
+  // 「两种语言都必填」的收紧不属于本步。名字字段（module.label / id / source / from / to）不走这里。
+  const isTranslatable = (x) => isNonEmptyStr(x)
+    || (isObj(x) && (isNonEmptyStr(x.zh) || isNonEmptyStr(x.en)));
+  // 数组项（meta.input / meta.output）比上面的标量字段更宽：旧 isStrArray 对**普通字符串一律放行**，
+  // 空串也放行。expand 步不收口——这一格不能顺手用 isTranslatable，否则就是把校验悄悄收紧了。
+  const isTranslatableItem = (x) => typeof x === 'string'
+    || (isObj(x) && (isNonEmptyStr(x.zh) || isNonEmptyStr(x.en)));
+  const isTranslatableArray = (x) => Array.isArray(x) && x.every((s) => isTranslatableItem(s));
+  const PROSE_HINT = 'must be a non-empty string or a {zh, en} object';
 
   if (!isObj(ir)) {
     return { ok: false, errors: [{ path: '$', message: 'IR must be a JSON object' }] };
@@ -16,14 +27,15 @@ function validate(ir, source) {
   if (!isObj(ir.meta)) {
     errors.push({ path: 'meta', message: 'meta is required and must be an object' });
   } else {
-    for (const f of ['title', 'subtitle']) {
-      if (!isNonEmptyStr(ir.meta[f])) {
-        errors.push({ path: `meta.${f}`, message: `${f} must be a non-empty string` });
-      }
+    if (!isNonEmptyStr(ir.meta.title)) {
+      errors.push({ path: 'meta.title', message: 'title must be a non-empty string' });
+    }
+    if (!isTranslatable(ir.meta.subtitle)) {
+      errors.push({ path: 'meta.subtitle', message: `subtitle ${PROSE_HINT}` });
     }
     for (const f of ['input', 'output']) {
-      if (!isStrArray(ir.meta[f])) {
-        errors.push({ path: `meta.${f}`, message: `${f} must be an array of strings` });
+      if (!isTranslatableArray(ir.meta[f])) {
+        errors.push({ path: `meta.${f}`, message: `${f} must be an array of strings or {zh, en} objects` });
       }
     }
   }
@@ -42,9 +54,12 @@ function validate(ir, source) {
           errors.push({ path: p, message: 'must be an object' });
           return;
         }
-        for (const f of ['id', 'label', 'description']) {
-          if (!isNonEmptyStr(g[f])) {
-            errors.push({ path: `${p}.${f}`, message: `${f} must be a non-empty string` });
+        if (!isNonEmptyStr(g.id)) {
+          errors.push({ path: `${p}.id`, message: 'id must be a non-empty string' });
+        }
+        for (const f of ['label', 'description']) {
+          if (!isTranslatable(g[f])) {
+            errors.push({ path: `${p}.${f}`, message: `${f} ${PROSE_HINT}` });
           }
         }
         if (isNonEmptyStr(g.id)) {
@@ -71,10 +86,14 @@ function validate(ir, source) {
         errors.push({ path: p, message: 'must be an object' });
         return;
       }
-      for (const f of ['id', 'label', 'description']) {
+      // label 是「名字」（源码标识符 / 包名），永远不译，因此只收字符串。
+      for (const f of ['id', 'label']) {
         if (!isNonEmptyStr(m[f])) {
           errors.push({ path: `${p}.${f}`, message: `${f} must be a non-empty string` });
         }
+      }
+      if (!isTranslatable(m.description)) {
+        errors.push({ path: `${p}.description`, message: `description ${PROSE_HINT}` });
       }
       if (m.type !== 'external' && m.type !== 'internal') {
         errors.push({ path: `${p}.type`, message: "type must be 'external' or 'internal'" });
@@ -87,10 +106,11 @@ function validate(ir, source) {
       }
       if (m.type === 'internal') {
         if (isNonEmptyStr(m.id)) internalIds.add(m.id);
-        for (const f of ['detail', 'source']) {
-          if (!isNonEmptyStr(m[f])) {
-            errors.push({ path: `${p}.${f}`, message: `internal module requires ${f} as a non-empty string` });
-          }
+        if (!isTranslatable(m.detail)) {
+          errors.push({ path: `${p}.detail`, message: `internal module requires detail as ${PROSE_HINT}` });
+        }
+        if (!isNonEmptyStr(m.source)) {
+          errors.push({ path: `${p}.source`, message: 'internal module requires source as a non-empty string' });
         }
         if (m.sourceLine !== undefined && m.sourceLine !== null && !Number.isInteger(m.sourceLine)) {
           errors.push({ path: `${p}.sourceLine`, message: 'sourceLine must be an integer when provided' });
@@ -131,10 +151,13 @@ function validate(ir, source) {
         errors.push({ path: p, message: 'must be an object' });
         return;
       }
-      for (const f of ['from', 'to', 'label']) {
+      for (const f of ['from', 'to']) {
         if (!isNonEmptyStr(c[f])) {
           errors.push({ path: `${p}.${f}`, message: `${f} must be a non-empty string` });
         }
+      }
+      if (!isTranslatable(c.label)) {
+        errors.push({ path: `${p}.label`, message: `label ${PROSE_HINT}` });
       }
       for (const f of ['from', 'to']) {
         const ref = c[f];
