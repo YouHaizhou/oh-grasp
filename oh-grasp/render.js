@@ -55,6 +55,8 @@ const CSS = `
   .vA-extname { display: block; font-family: var(--mono); font-size: 15px; font-weight: 600; color: var(--text); }
   .vA-extdesc { display: block; font-size: 12px; color: var(--muted); margin: 4px 0 8px; }
   .vA-extuse { display: block; font-size: 12px; color: var(--accent-deep); font-family: var(--mono); }
+  /* 反向索引（ADR-0011 决策三）：同一张卡片上的第二个方向——↳ 它提供哪些具名成员，← 谁在用它。 */
+  .vA-extidx { display: block; font-size: 12px; color: var(--muted); font-family: var(--mono); margin-top: 4px; }
   .vA-hint { font-size: 12px; color: var(--faint); margin-bottom: 10px; }
   .vA-flow { background: var(--canvas); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; position: relative; height: 580px; cursor: grab; user-select: none; }
   .vA-flow.dragging { cursor: grabbing; }
@@ -87,6 +89,11 @@ const CSS = `
   .vA-mcard-name { font-family: var(--mono); font-size: 14px; font-weight: 600; }
   .vA-mcard-desc { font-size: 12px; color: var(--muted); }
   .vA-boundary { display: flex; flex-direction: column; gap: 6px; }
+  /* 叶子弹窗的依赖行（ADR-0011 决策三）：依赖 · 宿主两半，各有标头。 */
+  .vA-depsrow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin: 0 0 16px; font-size: 13px; }
+  .vA-deps-cap { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+  .vA-deps-val { font-family: var(--mono); color: var(--text); }
+  .vA-deps-sep { color: var(--faint); }
   .vA-bedge { font-size: 13px; color: var(--muted); font-family: var(--mono); }
   .vA-bedge-arrow { color: var(--accent-deep); }
   .vA-bedge-lab { color: var(--text); }

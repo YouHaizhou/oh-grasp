@@ -110,6 +110,7 @@ function validate(ir, source) {
   // modules
   const ids = new Set();
   const internalIds = new Set();
+  const externalIds = new Set();
   if (!Array.isArray(ir.modules) || ir.modules.length === 0) {
     errors.push({ path: 'modules', message: 'modules must be a non-empty array' });
   } else {
@@ -158,8 +159,53 @@ function validate(ir, source) {
           }
         }
       } else if (m.type === 'external') {
+        if (isNonEmptyStr(m.id)) externalIds.add(m.id);
         if (!isStrArray(m.input)) {
           errors.push({ path: `${p}.input`, message: 'external module requires input as an array of strings' });
+        }
+      }
+    });
+  }
+
+  // uses / runtime（ADR-0011）：internal 模块消费了哪些 external、调用了哪些宿主运行时属性。
+  // **必须另跑一趟**：单趟遍历看不到**后面**才声明的 external（与下面 groupMemberCount 的
+  // 「先收集后检查」同一个理由）。两者都可缺席——缺席＝没有外部依赖／没有宿主调用，不是错误。
+  const RUNTIME_PATH = /^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)+$/;
+  if (Array.isArray(ir.modules)) {
+    ir.modules.forEach((m, i) => {
+      if (!isObj(m) || m.type !== 'internal') return;
+      const p = `modules[${i}]`;
+      if (m.uses !== undefined && m.uses !== null) {
+        if (!Array.isArray(m.uses)) {
+          errors.push({ path: `${p}.uses`, message: 'uses must be an array of strings when provided' });
+        } else {
+          m.uses.forEach((ref, k) => {
+            if (!isNonEmptyStr(ref)) {
+              errors.push({ path: `${p}.uses[${k}]`, message: 'uses must be a non-empty module id' });
+            } else if (!ids.has(ref)) {
+              errors.push({ path: `${p}.uses[${k}]`, message: `references unknown module id '${ref}'` });
+            } else if (!externalIds.has(ref)) {
+              // 与 connections 的端点约束镜像：那条要求 internal，这条要求 external（ADR-0011）。
+              errors.push({ path: `${p}.uses[${k}]`, message: `'uses' must reference an external module, got '${ref}'` });
+            }
+          });
+        }
+      }
+      if (m.runtime !== undefined && m.runtime !== null) {
+        if (!Array.isArray(m.runtime)) {
+          errors.push({ path: `${p}.runtime`, message: 'runtime must be an array of strings when provided' });
+        } else {
+          m.runtime.forEach((path, k) => {
+            // 值必须是**属性路径**（`process.exit` / `process.env`）：`process.exit(1)` 与
+            // `process.exit` 是同一个结构事实，参数是细节不是结构。
+            // 为什么只在它身上花一条正则：IR 里自由文本的字段有好几个（label / description /
+            // source / meta.subtitle…），但那些字段的**取值本来就是散文**，形状自由是它们的本性；
+            // `runtime` 是唯一「取值本身就是一个符号串、却由自由文本承载」的字段——不统形，
+            // 同一个调用就会被写成四种样子，反向索引与去重全部对不上（ADR-0011 决策二）。
+            if (!isNonEmptyStr(path) || !RUNTIME_PATH.test(path)) {
+              errors.push({ path: `${p}.runtime[${k}]`, message: `runtime entry must be a property path like 'process.exit' (no parentheses, no arguments)` });
+            }
+          });
         }
       }
     });

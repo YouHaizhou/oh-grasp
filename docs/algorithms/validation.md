@@ -8,9 +8,9 @@
 
 ## 1. 引用完整性（Set 去重 + 存在性 + 类型约束）
 
-**问题**：模块 id 不能重复；`connection.from/to`、`module.group` 必须指得到；connection 的端点必须是 **internal** 模块。
+**问题**：模块 id 不能重复；`connection.from/to`、`module.group`、`module.uses` 必须指得到；connection 的端点必须是 **internal** 模块，`uses` 的端点必须是 **external** 模块；`module.runtime` 每项必须是属性路径。
 
-**做法**：一趟遍历，边走边建 `Set`，边查边报
+**做法**：模块趟边走边建 `Set`（`ids` / `internalIds` / `externalIds`），边查边报；`uses` / `runtime` 另跑一趟（见下）
 
 | 检查 | 目的 |
 |---|---|
@@ -18,13 +18,21 @@
 | `group` 指向存在的 group | 悬挂引用 |
 | `connection.from/to` 指向存在的模块 | 悬挂引用 |
 | `connection.from/to` 必须是 internal | 外部依赖走侧栏（ADR-0006），不进数据流；且外部模块没有 `source`，画成边无从验证 |
+| `uses` 指向存在的模块 | 悬挂引用（拼错一个 id 就多出一条查不到的依赖） |
+| `uses` 必须指向 **external** | 与上一条镜像：`uses` 是消费关系，不是数据流边（ADR-0011 决策一）；指向内部模块会让同一条关系有两个字段各说各话 |
+| `runtime` 每项匹配属性路径正则 | `process.exit(1)` 与 `process.exit` 是同一个结构事实，自由文本不统形就会被写成四种样子，反向索引与去重全部对不上（ADR-0011 决策二） |
 | group 至少 2 个成员 | 1 个成员的分组是纯粹的包装，画出来多一层框但零信息 |
 
-**错误格式**：每条 `{path, message}`，path 是 JSON 路径（如 `connections[3].from`）——模型收到后能**直接定位**到要改的那一行，而不是重新猜整个文件。
+**`uses` / `runtime` 为什么另跑一趟**（ADR-0011）：这两个字段引用**其他模块的 id**，而单趟遍历只看得见**前面**声明过的模块——`uses: ["ext_path"]` 指向一个写在 `modules` 数组后面的 external 是完全合法的（validate.js:174–209，与 `groupMemberCount` 的「先收集后检查」同一个形状）。两个字段都可**缺席**：缺席＝没有外部依赖／没有宿主调用，不是错误；这一条由 `oh-grasp/test/validate.test.js` 的「uses and runtime are optional」钉住。
+
+**`runtime` 的正则**：`^[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)+$`——**至少一个点**。`process.env` / `process.cwd` / `process.exit` 放行，裸 `process` 被拒（它不是一个调用），`process.exit()` 被拒（括号不是属性路径的一部分）。只在它身上花一条正则，理由不是「它是唯一的自由文本字段」——IR 里自由文本的字段有好几个（`label` / `description` / `source` / `meta.subtitle` / `group.label`…），但那些字段的**取值本来就是散文**，形状自由是它们的本性。`runtime` 是唯一一个「取值本身就是一个**符号串**、却由自由文本承载」的字段：不统形，同一个调用就会被写成 `process.exit` / `process.exit(1)` / `process.exit(1) 终止进程` 四种样子，反向索引与去重全部对不上（ADR-0011 决策二）。
+
+**错误格式**：每条 `{path, message}`，path 是 JSON 路径（如 `connections[3].from`、`modules[3].uses[0]`）——模型收到后能**直接定位**到要改的那一行，而不是重新猜整个文件。
 
 **穷尽报告而非首错退出**：一次跑完收集所有错误。模型改一轮就全部修好，比「改一个跑一次」快得多。
 
-**位置**：validate.js:177（connections）、validate.js:76–176（groups / modules）。
+**位置**：validate.js:221（connections）、validate.js:77–209（groups / modules / uses / runtime）。
+**测试**：`oh-grasp/test/validate.test.js` —「a module with uses pointing at an external id passes」、「uses referencing an internal module fails (consumption is external-only)」、「uses referencing an unknown module id fails as a dangling reference」、「uses may point at an external declared later in the modules list」、「uses must be an array of strings when provided」、「runtime entries must be property paths: no parentheses, no bare globals」、「runtime entries that are property paths pass」、「runtime must be an array of strings when provided」、「uses and runtime are optional: absence is not an error (expand invariant)」。
 
 ---
 
@@ -41,7 +49,7 @@
 
 **已知盲区**：词边界挡住前缀匹配，但挡不住**注释或字符串里出现过**同名文字（`// TODO: extractQualityArgs`）。要彻底解决需要真正的语法解析（把源码 parse 成 AST 再找标识符节点），代价远大于收益——注释里出现一个函数名的概率低，且即便发生，图上的名字仍然指向真实存在的东西。
 
-**位置**：validate.js:234（`identifierExists`，由 validate.js:211 的存在性检查块调用）。
+**位置**：validate.js:280（`identifierExists`，由 validate.js:255 的存在性检查块调用）。
 
 ---
 
@@ -55,7 +63,7 @@
 
 **与 #2 的分工**：#2 保证**名字对**，#3 保证**正文对**。两条一起，把「模型编造/改写源码」这个最大风险按在 render 之前。
 
-**位置**：validate.js:242（`sourceContains`）。
+**位置**：validate.js:288（`sourceContains`）。
 
 ---
 
@@ -96,7 +104,7 @@
 
 **为什么错误路径要精确到那一格**：错在哪一格，模型改哪一格。写成 `connections[3].description: invalid` 会让它重猜整段，而四段说明是这张图上唯一**不可从源码推出**的文字——只能回头问用户，猜不出来。
 
-**位置**：validate.js:31（`checkFourPart`）、validate.js:196（connections 循环里的可选调用）。
+**位置**：validate.js:31（`checkFourPart`）、validate.js:240（connections 循环里的可选调用）。
 **测试**：`oh-grasp/test/validate.test.js` —「connection description with all four segments in both languages passes」、「a connection without description still passes (expand step, not the contract step)」、「connection description missing one segment fails with the exact path」、「connection description with an empty segment fails」、「connection description must be an object, not a plain string」、「an empty connection description fails」、「a description language subtree that is not an object fails at the language」、「one complete language subtree is tolerated (bilingual-required is the contract step)」、「every connection of the bilingual fixture carries the four segments in both languages」。
 
 ---
@@ -105,6 +113,8 @@
 
 ```
 connections[3].from: 'from' must reference an internal module, got 'ext_fs'
+modules[3].uses[0]: 'uses' must reference an external module, got 'parse'
+modules[3].runtime[0]: runtime entry must be a property path like 'process.exit' (no parentheses, no arguments)
 modules[7].label: internal module 'extractQualityArg' not found in source
 ```
 

@@ -40,7 +40,7 @@ M x1 y1  C x1 my  x2 my  x2 y2     my = (y1 + y2) / 2
 
 **它产出的是「路径几何」，不是「边」**：`fwdPath` 只算 `d` 与中点 `{xm, my}`，把 `d`、中点、标签、命中路径、hover 提示拼成**一个可点单元**的是 `fwdEdgeSvg`（见 rendering.md §3）。
 
-**位置**：viewer.js:593。
+**位置**：viewer.js:664。
 
 ---
 
@@ -64,7 +64,7 @@ M x1 y1  C x1 my  x2 my  x2 y2     my = (y1 + y2) / 2
 
 **与 `fwdPath` 一样**，它只算几何；拼成可点单元的是 `backEdgeSvg`（标签带 `↺` 前缀，`<title>` 里也是带前缀的整句，见 rendering.md §3）。
 
-**位置**：viewer.js:599。
+**位置**：viewer.js:670。
 
 ---
 
@@ -81,7 +81,7 @@ M x1 y1  C x1 my  x2 my  x2 y2     my = (y1 + y2) / 2
 
 **为什么居中而不是左对齐**：分层图天然是中间宽两头窄的菱形（第一层和最后一层通常只有一两个盒子）。左对齐会让菱形歪向一边、左侧留白巨大，正是用户反馈里的「左右侧空白」问题的一个来源。
 
-**位置**：viewer.js:231（行高与行内居中都在 `flowGeometry` 内）。
+**位置**：viewer.js:237（行高与行内居中都在 `flowGeometry` 内）。
 
 ---
 
@@ -101,7 +101,7 @@ M x1 y1  C x1 my  x2 my  x2 y2     my = (y1 + y2) / 2
 
 网格带同理，多一个横向居中：`translate((contentW - grid.W) / 2, grid.top)`。
 
-**位置**：viewer.js:710（区域堆叠游标，在 `flowSvg` 内）。
+**位置**：viewer.js:771（区域堆叠游标，在 `flowSvg` 内）。
 **测试**：`oh-grasp/fortest/smoke-viewer.js` —「多弱连通分量堆叠为纵向独立 translate 区（不重叠）」（断言 ≥3 个 `translate` 且 y 各不相同、6 个节点各渲染一次）。
 
 ---
@@ -125,7 +125,7 @@ M x1 y1  C x1 my  x2 my  x2 y2     my = (y1 + y2) / 2
 
 **它与上面那条理由的关系**：矩形的宽高确实是用**估值**算的（`edgeLabelParts` 里的 `chW` 累加，与 `fitWidth` 截断用同一把尺子），所以它比字形略宽或略窄是可能的。但误差的后果从「文字读不清」降级成了「白底衬边缘多出或少掉一两个像素」——文字本身仍有精确的描边兜着。**取舍：拿一点点视觉精度换一整块可点面积，值。** 这条估算误差目前只在真机上看得到，没有自动断言（见 rendering.md 第 4 节的覆盖缺口）。
 
-**位置**：viewer.js:625（`edgeLabelParts`，描边文字与白底衬在这里一起产出）；描边文字在 `fwdEdgeSvg` / `backEdgeSvg` 两处使用（viewer.js:635 / viewer.js:646）。
+**位置**：viewer.js:696（`edgeLabelParts`，描边文字与白底衬在这里一起产出）；描边文字在 `fwdEdgeSvg` / `backEdgeSvg` 两处使用（viewer.js:706 / viewer.js:717）。
 
 ---
 
@@ -137,7 +137,7 @@ M x1 y1  C x1 my  x2 my  x2 y2     my = (y1 + y2) / 2
 
 **为什么不用手工画三角形**：手工画要自己算切线角度（贝塞尔端点的切线是控制点连线方向），且箭头位置要留出路径缩短量。`marker` 是 SVG 原生能力，`refX` 负责把箭尖对齐到路径终点。
 
-**位置**：viewer.js:680（`markerDef`）。
+**位置**：viewer.js:751（`markerDef`）。
 
 ---
 
@@ -155,4 +155,4 @@ M x1 y1  C x1 my  x2 my  x2 y2     my = (y1 + y2) / 2
 
 **hover 提示**（`<title>`）：`nodeSvg` 的第一条子元素是一条 `<title>`，内容是**未截断的完整名字**（盒里那行是 `fitWidth` 截断过的）。名字被截断时，读者把鼠标停上去就能读全——截断只影响画布上的排版，不影响能不能读到名字。返回的字符串会被 `flowSvg` 包进 `<g class="node">`，所以这条 `<title>` 就是这个组的 hover 提示。
 
-**位置**：viewer.js:386（`nodeSvg`）、viewer.js:423（`portMark`）、viewer.js:434（`unitName`）、viewer.js:443（`portRows`）、viewer.js:471（`portListHtml`）。
+**位置**：viewer.js:392（`nodeSvg`）、viewer.js:429（`portMark`）、viewer.js:440（`unitName`）、viewer.js:449（`portRows`）、viewer.js:477（`portListHtml`）。

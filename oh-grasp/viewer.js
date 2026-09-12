@@ -90,11 +90,12 @@
       hint: '点击模块/分组查看详情 · 滚轮缩放（光标为锚点）· 拖拽平移 · 双击复位 · 虚线 ↺ 为反向/反馈连接',
       source: '源码 Source', line: '第 {n} 行',
       groupMeta: 'group · {n} 模块',
-      innerFlow: '内部数据流', boundary: '边界数据流', members: '成员模块',
+      innerFlow: '内部数据流', boundary: '组间边', members: '成员模块',
+      membersExt: '成员直连外部', host: '宿主', dep: '依赖',
       none: '无', dash: '—', feedback: '反馈',
       groupTag: 'GROUP', internalTag: 'INTERNAL', externalTag: 'EXTERNAL',
       edge: '连线', fourParts: '四段说明',
-      consumers: '消费者 Consumers', consumersNone: '无（按导入符号匹配，未命中）', consumersBlind: '无具名导入可匹配（default 导入）',
+      consumers: '消费者 Consumers', consumersNone: '无（没有模块在 uses 里声明用到它）',
       fp_source: '来源', fp_process: '处理', fp_output: '输出', fp_purpose: '用途',
     },
     en: {
@@ -103,11 +104,12 @@
       hint: 'Click a module / group for details · scroll to zoom (cursor-anchored) · drag to pan · double-click to reset · dashed ↺ = feedback connection',
       source: 'Source', line: 'line {n}',
       groupMeta: 'group · {n} modules',
-      innerFlow: 'Internal data flow', boundary: 'Boundary data flow', members: 'Member modules',
+      innerFlow: 'Internal data flow', boundary: 'Inter-group edges', members: 'Member modules',
+      membersExt: 'Members using external modules', host: 'Host', dep: 'Dependency',
       none: 'None', dash: '—', feedback: 'feedback',
       groupTag: 'GROUP', internalTag: 'INTERNAL', externalTag: 'EXTERNAL',
       edge: 'Connection', fourParts: 'Four-part description',
-      consumers: 'Consumers', consumersNone: 'None (no imported symbol matched)', consumersBlind: 'No named import to match (default import)',
+      consumers: 'Consumers', consumersNone: 'None (no module lists it in uses)',
       fp_source: 'Source', fp_process: 'Process', fp_output: 'Output', fp_purpose: 'Purpose',
     }
   };
@@ -168,16 +170,20 @@
   }
 
   /* ---------- 去重 + 首现顺序 + `a · b +2` 收尾 ----------
-     同一套表示同时给边中点标签（edgeLabel）与端口清单的对端（portListHtml）用：
-     读者学一次规则能用两处（ADR-0011）。 */
-  function uniqJoin(items) {
+     同一套表示同时给边中点标签（edgeLabel）、端口清单的对端（portListHtml）与侧栏依赖卡片的
+     反向索引（consIndex）用：读者学一次规则能用三处（ADR-0011）。
+     cap 是**截断预算**（列几项）：3 项以内一律全列——最窄的面也放得下，换成别的上限只会让
+     同一个数字在两种面上读法不同；再多才按面宽截断——画布中点标签与端口清单格子窄，用缺省的
+     2；侧栏卡片宽，反向索引传 3（ADR-0011 决策三：前 3 个 + `+M`，M = 总数 − 已列数）。 */
+  function uniqJoin(items, cap) {
     var out = [];
     (items || []).forEach(function (t) {
       if (t && out.indexOf(t) === -1) out.push(t);
     });
     if (!out.length) return '';
     if (out.length <= 3) return out.join(' · ');
-    return out.slice(0, 2).join(' · ') + ' +' + (out.length - 2);
+    var keep = cap === undefined ? 2 : cap;
+    return out.slice(0, keep).join(' · ') + ' +' + (out.length - keep);
   }
 
   /* ---------- 边 label 聚合（label 是可译散文，按语言取值后去重） ---------- */
@@ -458,9 +464,9 @@
     return order;
   }
 
-  // 一行清单的 HTML：`源 → 内容 → 目标`，箭头方向就是数据流方向。**两个清单共用**（端口清单、
-  // 消费者清单）——ADR-0011 的「学一次行语法，用在两处」。三个参数都收**已转义**的字符串，
-  // 转义在各自的调用点做（两边的取值路径不同，硬凑进来反而绕）。
+  // 一行清单的 HTML：`源 → 内容 → 目标`，箭头方向就是数据流方向。**三个清单共用**（端口清单、
+  // 消费者清单、group 弹窗第二段「成员直连外部」）——ADR-0011 的「学一次行语法，用在多处」。
+  // 三个参数都收**已转义**的字符串，转义在各自的调用点做（三边的取值路径不同，硬凑进来反而绕）。
   function rowHtml(src, lab, dst) {
     return '<div class="vA-pp-row"><span class="vA-pp-mod">' + src + '</span>' +
       '<span class="vA-pp-arrow">→</span><span class="vA-pp-lab">' + lab + '</span>' +
@@ -478,52 +484,117 @@
     }).join('');
   }
 
-  /* ---------- 消费者清单（点依赖卡片弹出）----------
-     回答「谁用了这个 external」（ADR-0010 第四个入口 / ADR-0011 的反向索引）。ADR-0011 的长期答案
-     是 internal 模块上的 `uses` 字段，但那个字段今天还不存在（schema 里没有、validate 硬拒
-     external 端点、IR 里 0 条），所以这里用现成的唯一信号：external 的**具名导入符号**
-     （`input` 里除 'default' 外的项，恰好就是「它被消费的成员」）在 internal 模块的 source 里
-     作为独立标识符出现。这与 round19 那次代理估算（`.scratch/count-ext-uses.js`）同一把尺子。
-     **已知盲区**（继承自同一把尺子，别当 bug 修）：default 导入的依赖（node:fs / node:os /
-     node:path …）没有符号名可匹配，恒返回 0 行；source 里也不含 import 语句，退不到按包名匹配。
-     票 06 把 `uses` 填进 IR 之后，这两个函数改读字段即可（弹窗那侧一个字都不用动）。 */
-  // external 的具名导入成员：`input` 里除 'default' 外的项（default 导入没有符号名可匹配）。
-  function extSymbols(m) {
-    return ((m && m.input) || []).filter(function (s) { return hasText(s) && s !== 'default'; });
-  }
-  // 标识符在源码里作为**独立词**出现：`respawn` 不该被 `spawn` 命中，`fs.readFileSync` 该被
-  // `readFileSync` 命中。用两侧负字符类而不是 `\b`——符号可以带 `$`，而 `\b` 只认 [A-Za-z0-9_]。
-  function hasSymbol(src, sym) {
-    if (!hasText(src) || !hasText(sym)) return false;
-    var lit = String(sym).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp('(^|[^A-Za-z0-9_$])' + lit + '([^A-Za-z0-9_$]|$)').test(src);
+  /* ---------- 消费者清单 / 反向索引（点依赖卡片弹出）----------
+     回答「谁用了这个 external，改了它会炸谁」（ADR-0010 第四个入口 / ADR-0011 决策三）。
+     数据源是 internal 模块上的 **`uses` 字段**——票 06 起不再用「具名导入符号匹配」的代理估算：
+     那把尺子对 default 导入（node:fs / node:os / node:path …）完全失明，恒 0 行，
+     而返回 0 的那几个恰恰是最常用的（round20 开头的更正）。
+     `uses` 是消费关系，不是数据流边：外部依赖仍不进 connections（ADR-0011 决策一）。 */
+  // 按 id 找模块（找不到回 null——validate 会挡住悬空引用，viewer 这边只保证不抛）。
+  function modById(id, modules) {
+    var found = null;
+    (modules || []).forEach(function (m) { if (m && m.id === id) found = m; });
+    return found;
   }
 
-  /* 消费者清单的行数据。行 = **一个 internal 模块**，保 IR 顺序；hits = 它用到的该 external 的
-     具名成员（保 `input` 顺序），即这行「凭什么说它是消费者」的证据。
-     返回 [{ id, label, hits }]——空数组有两种含义，调用方要靠 extSymbols 区分：
-     「有具名成员但没人用」与「default 导入，本版看不见（consumersBlind）」。 */
+  // 内部模块上的 `uses` 数组：缺席 / 形状坏了都当没有（validate 会挡，viewer 只保证不抛）。
+  function usesOf(m) {
+    return m && Array.isArray(m.uses) ? m.uses : [];
+  }
+
+  /* 消费者清单的行数据。行 = **一个直接声明用到该 external 的 internal 模块**，保 IR 顺序。
+     返回 [{ id, label }]。空数组现在只有一个含义：「没有模块声明用到它」——代理时代那种
+     「有具名成员但没人命中」与「default 导入看不见」的二分随数据源一起消失。 */
   function consRows(id, modules) {
-    var ext = null;
-    (modules || []).forEach(function (m) { if (m.id === id) ext = m; });
-    if (!ext) return [];
-    var syms = extSymbols(ext);
-    if (!syms.length) return [];
-    return (modules || []).filter(function (m) { return m.type === 'internal'; }).map(function (m) {
-      var hits = syms.filter(function (s) { return hasSymbol(m.source, s); });
-      return hits.length ? { id: m.id, label: m.label, hits: hits } : null;
-    }).filter(Boolean);
+    return (modules || []).filter(function (m) {
+      return m && m.type === 'internal' && usesOf(m).indexOf(id) !== -1;
+    }).map(function (m) { return { id: m.id, label: m.label }; });
   }
 
-  // 消费者清单的行：`消费者 → 用到的符号 → 这个 external`——同一个 `rowHtml`（ADR-0011）。
+  // 两个清单的**中间格**都是「该 external 的 `input` 折成一段」（与 group 段同一套读法）；
+  // `input` 为空时画「—」——中间格空着会读成一个坏掉的行（同一行的两个名字之间什么都没有），
+  // 而「—」说的是「这个 external 没记录到具名成员」（ADR-0006 的空段惯例）。
+  function extInputCell(ext, lang) {
+    return esc(uniqJoin((ext && ext.input) || []) || tr(lang, 'dash'));
+  }
+
+  /* 侧栏依赖卡片的**反向索引**：哪些模块用了它（ADR-0011 决策三）。列的是模块名（源码标识符，
+     不译），超过 3 个折成 `前 3 + +M`——侧栏卡片比画布上的标签格宽，所以这里传 cap = 3；共用
+     的仍是 `·` 连接与 `+M` 余数记法。 */
+  function consIndex(id, modules) {
+    return uniqJoin(consRows(id, modules).map(function (r) { return r.label; }), 3);
+  }
+
+  // 消费者清单的行：`消费者 → 该 external 的 input → 这个 external`——同一个 `rowHtml`（ADR-0011）。
+  // 中间格换成 external 自己的 `input`（与下面「成员直连外部」同一套读法）：行里不再有「命中的
+  // 符号」这回事，消费者与依赖的关系就是 `uses` 字段本身。
+  // 三样东西（模块名 / 包名 / 具名成员）都不译，所以行文本身与语言无关；`lang` 只有一个去处：
+  // `input` 为空时中间格那个「—」要跟着语言（空态占位是 UI 文案，不属于 IR）。
   // 行**不可点**：「清单行可点 + 一层返回」是票 05 的第二片。
   function consListHtml(id, lang, modules, M) {
     var rows = consRows(id, modules);
     if (!rows.length) return '';
+    var midCell = extInputCell(modById(id, modules), lang);
     var target = esc(modName(id, M));
     return rows.map(function (r) {
-      return rowHtml(esc(r.label), esc(r.hits.join(' · ')), target);
+      return rowHtml(esc(r.label), midCell, target);
     }).join('');
+  }
+
+  /* ---------- 成员直连外部（group 弹窗第二段）----------
+     ADR-0011 决策三：group 弹窗分两段。第一段是组间边（connections 推导，ADR-0006），第二段是
+     成员**自己的** `uses` 按 external 归并——两个事实源不互相冒充：成员吃外部依赖这件事在
+     connections 里本来就没有（外部依赖不进数据流边），不说出来就等于图在撒谎。 */
+  /* 行数据：行 = 一个 external，members = 本组里声明用到它的成员（保 IR 顺序）。
+     行序按 external id 排序（而不是成员遍历顺序）：读者在弹窗里是按包名找行的。
+     返回 [{ id, members }]。 */
+  function extUseRows(memberIds, modules) {
+    // 键是 external id（用户数据），普通 {} 会被 "constructor" 这类 id 命中内置属性，故用无原型对象。
+    // 成员表用 hasOwnProperty 判「在不在表里」而不是取真值：`memberIds['toString']` 会被原型链命成
+    // 真值，一个恰好叫 toString 的模块就会被算进每一组的成员里；只认自有键则与值的形状无关。
+    var byId = Object.create(null), out = [];
+    (modules || []).forEach(function (m) {
+      if (!m || m.type !== 'internal') return;
+      if (!memberIds || !Object.prototype.hasOwnProperty.call(memberIds, m.id)) return;
+      usesOf(m).forEach(function (x) {
+        var row = byId[x];
+        if (!row) { row = byId[x] = { id: x, members: [] }; out.push(row); }
+        if (row.members.indexOf(m.id) === -1) row.members.push(m.id);
+      });
+    });
+    return out.sort(function (a, b) { return a.id < b.id ? -1 : (a.id > b.id ? 1 : 0); });
+  }
+
+  // 行 HTML：`成员们 → 该 external 的 input → external 名`——与端口清单、消费者清单共用 rowHtml
+  // （ADR-0011：学一次行语法，用在多处）。成员名是源码标识符、包名不译；一行里成员多时用缺省的 2
+  // 折叠（弹窗面窄）。一条 uses 都没有时返回空串，由调用方画「—」（ADR-0006 的空段惯例）。
+  function extUseHtml(memberIds, modules, M, lang) {
+    return extUseRows(memberIds, modules).map(function (row) {
+      var ext = modById(row.id, modules);
+      var names = row.members.map(function (id) { return modName(id, M); });
+      return rowHtml(esc(uniqJoin(names)), extInputCell(ext, lang), esc(ext ? ext.label : row.id));
+    }).join('');
+  }
+
+  /* ---------- 叶子弹窗的依赖行（ADR-0011 决策三）----------
+     `依赖 <包名 · …> · 宿主 <属性路径 · …>`——两半都是**模块自己的**字段（`uses` / `runtime`），
+     照 ADR-0006 的空端口惯例：为空的那一半显式画「—」，静默留白会被读成「这一行本来就不该有」。
+     依赖那一半列 external 的 label（包名，绝不译）；查不到的 id 退回 id 本身（validate 会挡悬空）。
+     两个标头各用一个键（`dep` / `host`）而**不复用侧栏的 `deps`**：那个键的值是双语的分节标题
+     「依赖 Dependencies」，当行内标头用会读成「依赖 Dependencies fs · …」，而 ADR-0011 决策三写的
+     是「依赖 … · 宿主 …」（分节标题与行内标头在 IR 外面是两种写法）。 */
+  function depsHtml(m, lang, M) {
+    var mi = M || {};
+    var names = usesOf(m).map(function (id) { return modName(id, mi); });
+    // runtime 没有对应的助手：它只有这一处读，多抽一层反而绕（与 usesOf 的三处调用不同）。
+    var rt = (m && Array.isArray(m.runtime) ? m.runtime : []);
+    return '<div class="vA-depsrow">' +
+      '<span class="vA-deps-cap">' + esc(tr(lang, 'dep')) + '</span>' +
+      '<span class="vA-deps-val">' + esc(uniqJoin(names) || tr(lang, 'dash')) + '</span>' +
+      '<span class="vA-deps-sep">·</span>' +
+      '<span class="vA-deps-cap">' + esc(tr(lang, 'host')) + '</span>' +
+      '<span class="vA-deps-val">' + esc(uniqJoin(rt) || tr(lang, 'dash')) + '</span>' +
+      '</div>';
   }
 
   /* ---------- 四段说明（点边弹出）----------
@@ -858,10 +929,15 @@
     var extRail =
       '<aside class="vA-ext"><div class="vA-sec">' + esc(tr(lang, 'deps')) + '</div>' +
       ext.map(function (m) {
+        // 卡片两个方向各一行：`↳` 它提供哪些具名成员，`←` **谁在用它**（反向索引，ADR-0011 决策三）。
+        // 没有消费者时显式画「—」而不是省略这一行——ADR-0006 的空段惯例：省掉的那一行读不出
+        // 「没人用它」还是「没做这个功能」。
+        var idx = consIndex(m.id, ir.modules);
         return '<button type="button" class="vA-extcard" data-id="' + esc(m.id) + '">' +
           '<span class="vA-extname">' + esc(m.label) + '</span>' +
           '<span class="vA-extdesc">' + esc(pick(m.description, lang)) + '</span>' +
-          '<span class="vA-extuse">↳ ' + esc((m.input || []).join(', ')) + '</span></button>';
+          '<span class="vA-extuse">↳ ' + esc((m.input || []).join(', ')) + '</span>' +
+          '<span class="vA-extidx">← ' + esc(idx || tr(lang, 'dash')) + '</span></button>';
       }).join('') + '</aside>';
 
     // 折叠拓扑：group 与未分组叶子当顶层单元；同向连接聚合。
@@ -935,6 +1011,9 @@
         kind: tr(lang, m.type === 'external' ? 'externalTag' : 'internalTag'),
         cls: '',
         html: '<p class="vA-detail-desc">' + esc(pick(m.detail || m.description, lang)) + '</p>' +
+          // 依赖行只给 internal（ADR-0011 决策三）：`uses` / `runtime` 是 internal 模块的字段，
+          // 给 external 画一行「依赖 — · 宿主 —」是把「它没有这两个字段」说成「它什么都没有」。
+          (m.type === 'internal' ? depsHtml(m, lang, M) : '') +
           (m.source ? '<h4>' + esc(tr(lang, 'source')) + (typeof m.sourceLine === 'number' ? ' · ' + esc(fmt(tr(lang, 'line'), m.sourceLine)) : '') + '</h4><pre class="vA-src"><code>' + esc(m.source) + '</code></pre>' : ''),
         mount: function () {
           root.querySelectorAll('.node').forEach(function (g) { g.classList.toggle('sel', g.dataset.id === id); });
@@ -965,7 +1044,7 @@
         var sub = flowSvg(ids, innerEdges, null, lang);
         spec.html += '<h4>' + esc(tr(lang, 'innerFlow')) + '</h4>' +
           '<div class="vA-flow vA-flow-sub" id="subViewport"><div class="vA-zoom" id="subZoom">' + sub.svg + '</div></div>';
-        spec.html += boundaryBlock(boundary, memberIds);
+        spec.html += groupSections(boundary, memberIds);
         spec.mount = function () {
           var sCtl = attachFlow(detail.querySelector('#subViewport'), detail.querySelector('#subZoom'), sub.W, sub.H, null);
           detail.querySelectorAll('.node').forEach(function (n) {
@@ -984,7 +1063,7 @@
         return '<button class="vA-mcard" data-id="' + esc(m.id) + '" type="button"><span class="vA-mcard-name">' + esc(m.label) + '</span><span class="vA-mcard-desc">' + esc(pick(m.description, lang)) + '</span></button>';
       }).join('');
       spec.html += '<h4>' + esc(tr(lang, 'members')) + '</h4><div class="vA-mgrid">' + cards + '</div>' +
-        boundaryBlock(boundary, memberIds);
+        groupSections(boundary, memberIds);
       spec.mount = function () {
         detail.querySelectorAll('.vA-mcard').forEach(function (card) {
           card.addEventListener('click', function () { openDetail(card.dataset.id); });
@@ -1018,20 +1097,18 @@
 
     // 内容⑥：外部依赖的消费者清单（点侧栏依赖卡片）——第四个入口，story 34 / ADR-0011。
     // 「谁用了这个 external」。行数据与行 HTML 都在内核（consRows / consListHtml），这里
-    // 只把这份 HTML 塞进弹窗。空清单分两种，两句都不说「无」——本版这份清单是**按导入符号
-    // 匹配的代理**（见 consRows），一句干净的「无」会被读成「没人依赖它」，而它可能只是没命中：
-    //   consumersNone  → 有具名成员，但没有模块的 source 命中它
-    //   consumersBlind → 这个 external 只有 default 导入，本版**看不见**它的消费者
+    // 只把这份 HTML 塞进弹窗。空清单只剩一种含义：**没有模块在 `uses` 里声明用到它**——
+    // 代理时代那句「无具名导入可匹配（default 导入）」随数据源一起删除，default 导入不再失明。
+    // 空态仍明说依据（consumersNone）：一句光秃秃的「无」读不出「查过了，就是没有」。
     function consSpec(id) {
       var m = M[id];
       var rows = consListHtml(id, lang, ir.modules, M);
-      var empty = extSymbols(m).length ? tr(lang, 'consumersNone') : tr(lang, 'consumersBlind');
       return {
         name: m.label,                                    // 包名不译（story 7）
         kind: tr(lang, 'externalTag'),
         cls: 'vA-modal-sm',
         html: '<h4>' + esc(tr(lang, 'consumers')) + '</h4>' +
-          (rows || '<div class="vA-empty">' + esc(empty) + '</div>')
+          (rows || '<div class="vA-empty">' + esc(tr(lang, 'consumersNone')) + '</div>')
       };
     }
 
@@ -1067,6 +1144,20 @@
       if (boundary.length) return '<h4>' + esc(tr(lang, 'boundary')) + '</h4><div class="vA-boundary">' + bedgeHtml(boundary, memberIds) + '</div>';
       // ADR-0006：无组间边时，输入/输出显示「—」而不是留空区/空端口。
       return '<h4>' + esc(tr(lang, 'boundary')) + '</h4><div class="vA-empty">' + esc(tr(lang, 'input')) + ' ' + esc(tr(lang, 'dash')) + ' · ' + esc(tr(lang, 'output')) + ' ' + esc(tr(lang, 'dash')) + '</div>';
+    }
+    // 第二段：成员直连外部（ADR-0011 决策三）。成员在吃外部依赖这件事 connections 里没有
+    // （外部依赖不进数据流边），所以它得单独说；行的形状与消费者清单同一个 rowHtml。
+    function extUseBlock(memberIds) {
+      var rows = extUseHtml(memberIds, ir.modules, M, lang);
+      var head = '<h4>' + esc(tr(lang, 'membersExt')) + '</h4>';
+      if (rows) return head + '<div class="vA-boundary">' + rows + '</div>';
+      // 一条 uses 都没有时画「—」而不是留白（ADR-0006）：留白读不出「成员没有外部依赖」
+      // 还是「这一段没做」。
+      return head + '<div class="vA-empty">' + esc(tr(lang, 'dash')) + '</div>';
+    }
+    // group 弹窗的两段一次给全：两个事实源（组间边 / 成员直连外部）不互相冒充。
+    function groupSections(boundary, memberIds) {
+      return boundaryBlock(boundary, memberIds) + extUseBlock(memberIds);
     }
     // 语言切换器：立即生效（整页重渲染），不记忆。
     var zhBtn = root.querySelector('#langZh'), enBtn = root.querySelector('#langEn');
@@ -1180,8 +1271,12 @@
       // 纯字符串渲染内核：盒体、边路径、端口清单（往上搬出 document 门，好让「画了什么」可断言）
       nodeSvg: nodeSvg, fwdPath: fwdPath, feedbackPath: feedbackPath,
       unitName: unitName, portRows: portRows, portListHtml: portListHtml,
-      // 消费者清单（点依赖卡片）：行数据 + 行 HTML，同款分家（票 05 第四入口）
-      consRows: consRows, consListHtml: consListHtml,
+      // 消费者清单（点依赖卡片）：行数据 + 行 HTML + 反向索引字符串；数据源是 `module.uses`
+      // （票 06 起不再是对导入符号做代理估算）——ADR-0011 决策一/三
+      consRows: consRows, consListHtml: consListHtml, consIndex: consIndex,
+      // 外部依赖的两个新显示面：group 弹窗第二段「成员直连外部」的行数据/行 HTML、
+      // 叶子弹窗的依赖行（ADR-0011 决策三）
+      extUseRows: extUseRows, extUseHtml: extUseHtml, depsHtml: depsHtml,
       // 边的可点单元：命中路径 + 中点标签 + hover title 合成同一个带边身份的组（ADR-0010）
       fwdEdgeSvg: fwdEdgeSvg, backEdgeSvg: backEdgeSvg,
       // 四段说明：取值、按来源模块分组的行数据、行 HTML（照 portRows / portListHtml 的分家方式）

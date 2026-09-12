@@ -56,6 +56,16 @@
         "source": { "type": "string", "description": "仅 internal 模块：该模块的完整函数体原文（弹窗里显示，从源文件原文摘出，勿只给声明行）。" },
         "sourceLine": { "type": "integer", "description": "仅 internal 模块：source 在源文件中的起始行号（可选，仅校验为整数，不校验行号值是否正确）。" },
         "group": { "type": "string", "description": "仅 internal 模块：所属分组的 id（可选，引用 groups[] 里的 id；留空表示单飞叶子）。" },
+        "uses": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "仅 internal 模块：该模块**直接消费**的 external 模块 id（可选，引用 modules[] 里的 id 且那一项必须是 external）。这是消费关系，不是数据流边——外部依赖不进 connections（ADR-0011）；缺席＝没有外部依赖。"
+        },
+        "runtime": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "仅 internal 模块：对宿主运行时的调用（可选），每项是一个**属性路径**（如 process.exit、process.env），不带括号与参数。属性路径才统形，自由文本会让同一个调用写成四种样子（ADR-0011）；缺席＝没有宿主调用。"
+        },
         "input": {
           "type": "array",
           "items": { "type": "string" },

@@ -31,16 +31,25 @@
       "input": ["readFileSync"]
     },
     {
+      "id": "ext_path",
+      "label": "node:path",
+      "type": "external",
+      "description": { "zh": "拼接与规范化文件路径", "en": "Joins and normalizes file paths" },
+      "input": ["default"]
+    },
+    {
       "id": "read_config",
       "label": "readConfig",
       "type": "internal",
       "group": "grp_io",
       "description": { "zh": "读文件并把原文交给解析", "en": "Reads the file and hands the raw text to the parser" },
       "detail": {
-        "zh": "读取指定路径的配置文件，用 fs.readFileSync 同步读取整个文件为 UTF-8 字符串，再原样交给 parseConfig 解析。此处不做任何校验或转换。",
-        "en": "Reads the config file at the given path with fs.readFileSync as a UTF-8 string and hands it to parseConfig unchanged. No validation or conversion happens here."
+        "zh": "把配置路径按 process.cwd() 解析成绝对路径，用 fs.readFileSync 同步读取整个文件为 UTF-8 字符串，再原样交给 parseConfig 解析。此处不做任何校验或转换。",
+        "en": "Resolves the config path against process.cwd(), reads the whole file synchronously as UTF-8 with fs.readFileSync, then hands it to parseConfig unchanged. No validation or conversion happens here."
       },
-      "source": "function readConfig(path) {\n  const raw = fs.readFileSync(path, 'utf8');\n  return parseConfig(raw);\n}"
+      "uses": ["ext_fs", "ext_path"],
+      "runtime": ["process.cwd"],
+      "source": "function readConfig(configPath) {\n  const resolved = path.resolve(process.cwd(), configPath);\n  const raw = fs.readFileSync(resolved, 'utf8');\n  return parseConfig(raw);\n}"
     },
     {
       "id": "parse_config",
@@ -49,10 +58,11 @@
       "group": "grp_io",
       "description": { "zh": "把原始文本解析成配置对象", "en": "Parses the raw text into a config object" },
       "detail": {
-        "zh": "接收 readConfig 传来的原始文本，调用 JSON.parse 解析为配置对象。解析失败时异常会向上抛出，由调用方决定如何处理。",
-        "en": "Takes the raw text from readConfig and parses it with JSON.parse. A parse failure propagates up to the caller."
+        "zh": "接收 readConfig 传来的原始文本，调用 JSON.parse 解析为配置对象，并用 path 校验 entry 是绝对路径。解析失败或 entry 不合法时异常会向上抛出，由调用方决定如何处理。",
+        "en": "Takes the raw text from readConfig, parses it with JSON.parse, and uses path to check that entry is an absolute path. A parse failure or a bad entry propagates up to the caller."
       },
-      "source": "function parseConfig(raw) {\n  return JSON.parse(raw);\n}"
+      "uses": ["ext_path"],
+      "source": "function parseConfig(raw) {\n  const config = JSON.parse(raw);\n  if (!path.isAbsolute(config.entry)) {\n    throw new Error('entry must be an absolute path');\n  }\n  return config;\n}"
     },
     {
       "id": "process_records",

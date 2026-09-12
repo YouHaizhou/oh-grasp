@@ -492,3 +492,88 @@ test('one complete language subtree is tolerated (bilingual-required is the cont
   const r = validate(ir);
   assert.equal(r.ok, true);
 });
+
+// === uses / runtime：外部依赖与宿主调用（ADR-0011） ===
+// 两条字段都**只**标在 internal 模块上，且都可以缺席（缺席＝没有外部依赖／没有宿主调用）。
+test('a module with uses pointing at an external id passes', () => {
+  const ir = validIR();
+  ir.modules[1].uses = ['ext_fs'];
+  ir.modules[1].runtime = ['process.exit', 'process.env', 'process.cwd'];
+  const r = validate(ir);
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+  assert.deepEqual(r.errors, []);
+});
+
+test('uses referencing an internal module fails (consumption is external-only)', () => {
+  const ir = validIR();
+  ir.modules[2].uses = ['parse'];
+  const r = validate(ir);
+  assert.equal(r.ok, false);
+  const e = r.errors.find((x) => x.path === 'modules[2].uses[0]');
+  assert.ok(e, 'path 要指到具体那一项：' + JSON.stringify(r.errors));
+  assert.equal(e.message, "'uses' must reference an external module, got 'parse'",
+    '镜像 connections 的同款判决：外部端点不进数据流，内部端点也不进 uses');
+});
+
+test('uses referencing an unknown module id fails as a dangling reference', () => {
+  const ir = validIR();
+  ir.modules[1].uses = ['ext_nope'];
+  const r = validate(ir);
+  assert.equal(r.ok, false);
+  const e = r.errors.find((x) => x.path === 'modules[1].uses[0]');
+  assert.ok(e);
+  assert.equal(e.message, "references unknown module id 'ext_nope'");
+});
+
+test('uses may point at an external declared later in the modules list', () => {
+  // 单趟遍历看不到**后面**才声明的 external —— 这条把「先收集后检查」这个顺序要求钉住。
+  const ir = validIR();
+  ir.modules.push({ id: 'ext_path', label: 'node:path', type: 'external', description: 'path utils', input: ['default'] });
+  ir.modules[1].uses = ['ext_path'];
+  const r = validate(ir);
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+});
+
+test('uses must be an array of strings when provided', () => {
+  const ir = validIR();
+  ir.modules[1].uses = 'ext_fs';
+  assert.ok(validate(ir).errors.some((e) => e.path === 'modules[1].uses'));
+  ir.modules[1].uses = ['ext_fs', 42];
+  assert.ok(validate(ir).errors.some((e) => e.path === 'modules[1].uses[1]'));
+});
+
+test('runtime entries must be property paths: no parentheses, no bare globals', () => {
+  // `process.exit()` 与 `process.exit` 是同一个结构事实，参数是细节不是结构（ADR-0011）；
+  // 自由文本不统形，同一个符号会被写成四种样子，反向索引和去重全部对不上。
+  const bad = ['process.exit()', 'process', 'process.exit(1)', '  ', 'process .exit', 'process.exit;'];
+  bad.forEach((v) => {
+    const ir = validIR();
+    ir.modules[1].runtime = [v];
+    const r = validate(ir);
+    assert.ok(r.errors.some((e) => e.path === 'modules[1].runtime[0]'),
+      `runtime 应拒 ${JSON.stringify(v)}：` + JSON.stringify(r.errors));
+  });
+});
+
+test('runtime entries that are property paths pass', () => {
+  const ir = validIR();
+  ir.modules[1].runtime = ['process.env', 'process.cwd', 'process.exit'];
+  const r = validate(ir);
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+});
+
+test('runtime must be an array of strings when provided', () => {
+  const ir = validIR();
+  ir.modules[1].runtime = 'process.exit';
+  assert.ok(validate(ir).errors.some((e) => e.path === 'modules[1].runtime'));
+});
+
+test('uses and runtime are optional: absence is not an error (expand invariant)', () => {
+  const ir = validIR();
+  assert.ok(!('uses' in ir.modules[1]) && !('runtime' in ir.modules[1]));
+  assert.equal(validate(ir).ok, true);
+  // 空数组同样是「什么都没有」，不是「字段坏了」。
+  ir.modules[1].uses = [];
+  ir.modules[1].runtime = [];
+  assert.equal(validate(ir).ok, true);
+});

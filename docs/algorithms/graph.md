@@ -29,7 +29,7 @@
 **为什么是这个方案**：线性时间、实现短、且断出来的边**恰好就是读者心里的那些回边**（反馈弧），不需要额外解释。理论最优（最小反馈弧集）是 NP-hard，启发式就够。
 
 **复杂度**：O(V+E)。递归实现——本项目 41 个模块，栈深无虞；若将来模块数上千需要改成显式栈（`components` 已经是显式栈，可参考）。
-**位置**：viewer.js:242（后向边判定，在 `flowGeometry` 内）。
+**位置**：viewer.js:248（后向边判定，在 `flowGeometry` 内）。
 **测试**：`test/layout.test.js` —「2-cycle is broken into one DAG edge plus one feedback edge」、「triangle feeds exactly one feedback edge and stays acyclic」、「feedback lane is not included in the layout DAG edges」。
 
 ---
@@ -46,14 +46,14 @@ layer[v] = max(layer[v], layer[u] + 1)
 
 即「v 至少比它的**最深**前驱再深一层」。取 max 而非 min 是关键：取 min 会让节点浮到上面、与另一条路径上的前驱同层甚至更靠上，连线就会横穿。取 max 得到**最长路分层**——每条边都严格向下，从不横穿或上折。
 
-**兜底分支**：理论上 DAG 跑完 Kahn 所有节点都会出队。代码里仍留了「未出队的节点放到最深层 +1」的兜底（viewer.js:270），因为上游的断环若有疏漏（例如自环 `from === to`），Kahn 会静默漏掉节点而不是报错——兜底保证**任何输入都不丢节点**。图上一个位置错了的盒子，好过一个凭空消失的盒子。
+**兜底分支**：理论上 DAG 跑完 Kahn 所有节点都会出队。代码里仍留了「未出队的节点放到最深层 +1」的兜底（viewer.js:276），因为上游的断环若有疏漏（例如自环 `from === to`），Kahn 会静默漏掉节点而不是报错——兜底保证**任何输入都不丢节点**。图上一个位置错了的盒子，好过一个凭空消失的盒子。
 
 **已知低效**（量级无碍，登记在案）：
 - 队列用 `Array.shift()` 出队 → O(n) 每次，整体 O(V²)。V = 层数级别的节点数时才需要换成游标队列。
 - 兜底分支用 `fin.indexOf(id)` 扫全表 → O(V²)。
 
 **复杂度**：O(V+E)，受上述两处影响。
-**位置**：viewer.js:264（分层那一行，在 `flowGeometry` 内）。
+**位置**：viewer.js:270（分层那一行，在 `flowGeometry` 内）。
 **测试**：`test/layout.test.js` —「longest-path layering puts sinks deepest」。
 
 ---
@@ -77,7 +77,7 @@ layer[v] = max(layer[v], layer[u] + 1)
 **已知低效**：`predsOf`/`succsOf` 每次调用都 `fwd.filter(...)` 扫一遍全边集 → 单次排序 O(V·E)，整体 O(V·E·passes)。修法是预建 `from → edges` / `to → edges` 邻接索引（断环那一步已经有 `adj` 了，复用即可）。
 
 **复杂度**：O(V·E·passes)。
-**位置**：viewer.js:278（层内排序 / 重心扫描，在 `flowGeometry` 内）。
+**位置**：viewer.js:285（层内排序 / 重心扫描，在 `flowGeometry` 内）。
 **测试**：层内顺序不影响 `flowGeometry` 的接口契约（`layers` 数组本身是返回值，测试断的是分层正确性与不重叠）。
 
 ---
@@ -91,7 +91,7 @@ layer[v] = max(layer[v], layer[u] + 1)
 **为什么不用 `Array.prototype.sort` 的稳定性**：ES2019 起规范确实保证稳定，但依赖它会让「稳定性」变成一条看不见的隐含前提。显式写进比较键，代码自己说明了意图，也不受运行环境差异影响。
 
 **复杂度**：O(n log n)，多一次数组映射的常数开销。
-**位置**：viewer.js:281（`stableSort`）。
+**位置**：viewer.js:287（`stableSort`）。
 
 ---
 
@@ -106,7 +106,7 @@ layer[v] = max(layer[v], layer[u] + 1)
 **注意**：弱连通（忽略方向）而不是强连通——两个节点只要**任一方向**可达，就该画在同一片里；强连通分解会把 `a→b` 和 `b→a` 分开，那不是我们要的。
 
 **复杂度**：O(V+E)。`edges.filter` 每个分量扫一遍全边集，分量数为 k 时 O(k·E)（k 通常 ≤3）。
-**位置**：viewer.js:204。
+**位置**：viewer.js:210。
 **测试**：`test/layout.test.js` —「components splits disconnected regions and isolates edgeless nodes」、「components treat undirected reachability (2-cycle stays one comp)」。
 
 ---
@@ -122,7 +122,7 @@ layer[v] = max(layer[v], layer[u] + 1)
 **为什么是首适应而不是最优装箱**：这是「顺序排布」不是「二维装箱」——节点的**先后顺序有意义**（跟 IR 里的顺序一致，读者能预期），不能为了塞得更紧而重排。首适应是保序装箱里最简的一个。
 
 **复杂度**：O(n)。
-**位置**：viewer.js:350（`gridGeometry`）。
+**位置**：viewer.js:356（`gridGeometry`）。
 **测试**：`test/layout.test.js` —「gridGeometry wraps isolated leaves into rows capped near GRID_CAP」、「gridGeometry places a single node」。
 
 ---
@@ -140,7 +140,7 @@ layer[v] = max(layer[v], layer[u] + 1)
 **点开的清单也用同一把尺子**：`×N` 说「4 种内容」，点开却列 12 行，就是同一处不一致换了个方向——「点开数得清」落空。所以端口清单（`portRows` / `portListHtml`）**分组键与 `countPorts` 完全一致**（`pick(label, 'zh')`），行数因此恒等于 `×N`，切语言行数也不变。组内取 IR 顺序第一条 connection 的 label 当该行内容（与 `inRep`/`outRep` 同一规则）；点开的单元在出方向恒为 `from`、入方向恒为 `to`，唯一在变的是**对端**——对端按首现顺序去重，多个时走 `uniqJoin` 收尾（见第 8 节，与边中点标签同一套表示）。
 
 **复杂度**：O(E)。
-**位置**：viewer.js:144（`countPorts`）、viewer.js:443（`portRows`）、viewer.js:471（`portListHtml`）。
+**位置**：viewer.js:146（`countPorts`）、viewer.js:449（`portRows`）、viewer.js:477（`portListHtml`）。
 **测试**：`test/layout.test.js` —「countPorts counts distinct content kinds per direction, not connections」、「countPorts works on monolingual artifacts (plain-string labels)」（单语产物：普通字符串按 zh 取值就是它本身，所以 N 不变）、「bilingual fixture exercises dedup: kinds < connection count」、「port list rows equal ×N on the bilingual fixture (kinds < connections)」、「port list rows equal ×N on a real-artifact-shaped port (8 connections, 4 kinds)」、「port list rows equal ×N on a monolingual graph (plain-string labels)」、「every port of the bilingual fixture has as many list rows as ×N, in both languages」。
 
 ---
@@ -151,17 +151,17 @@ layer[v] = max(layer[v], layer[u] + 1)
 
 **语义（ADR-0008 起）：中点是「动作」，不是「数据名」。** `label` 从「流的是什么」（`renderer script path` / `配置文件原文`）改写成一句**动宾短语**（「传入渲染器路径」/「传入配置文件原文」）——名词读不出这条线在干什么，动作才是一句话。四段说明（从哪来 / 经过什么处理 / 输出了什么 / 用于什么）是**点开才看的数据**，中点只放它的一句摘要（见第 10 节）。
 
-**做法**：按 label 字符串去重（保持首次出现顺序），≤3 个用 ` · ` 连起来；多于 3 个只取前 2 个 + ` +N`（N = 剩余不同标签数）。用「不同标签数」而不是「连接数」，是因为 `+N` 要传达「还有 N 种别的东西」，重复的东西不该计数。
+**做法**：按 label 字符串去重（保持首次出现顺序），≤3 个用 ` · ` 连起来；多于 3 个只取前 `cap` 个 + ` +N`（N = 剩余不同标签数，`cap` 缺省 2）。用「不同标签数」而不是「连接数」，是因为 `+N` 要传达「还有 N 种别的东西」，重复的东西不该计数。
 
-这套「去重 + 首现顺序 + `a · b +2`」抽成了 `uniqJoin`：**边中点标签与端口清单的对端共用同一套表示**（读者学一次规则能用两处，ADR-0011 对反向索引也是这个思路）。`edgeLabel(e, lang)` 现在只是「按语言取值 → `uniqJoin`」。
+这套「去重 + 首现顺序 + `a · b +2`」抽成了 `uniqJoin(items, cap)`：**边中点标签、端口清单的对端、成员直连外部的成员名、叶子弹窗依赖行的两半、侧栏卡片的反向索引共用同一套表示**（读者学一次规则，五个面通用，ADR-0011）。`cap` 是**截断预算**（列几项）：3 项以内一律全列——最窄的面也放得下——再多才按面宽截断：画布与弹窗里的四处用缺省的 2（边中点标签、端口清单的对端、成员直连外部的成员名、叶子弹窗依赖行的两半——都是一行文字，格子窄），反向索引传 3（侧栏卡片宽，ADR-0011 决策三：前 3 个 + `+M`）。`edgeLabel(e, lang)` 现在只是「按语言取值 → `uniqJoin`」。
 
 **去重键是「按当前语言取值之后」的文本**——中点是给人读的，显示哪种语言就按哪种去重。这与 `countPorts` / `portRows` 的 zh 键是两件事，别混：那两处的 N 是**数字**，切语言不能变（所以按 zh 去重，见第 7 节）；中点显示的是**文字**，本来就该跟着语言走。
 
 **注意**：47 条 connection 只有 20 个不同 label（`renderer script path` 一类反复出现），所以去重口径直接决定中点显示什么。
 
 **复杂度**：O(n²)（`indexOf` 查重），n = 该边折的 connection 数（≤12），无碍。
-**位置**：viewer.js:173（`uniqJoin`）、viewer.js:184（`edgeLabel`）。
-**测试**：`test/layout.test.js` —「edgeLabel dedupes and truncates at 3 unique labels」、「edgeLabel aggregates per language (labels are prose and go through pick)」、「bilingual fixture writes mid-point labels as action phrases, per language」、「port list collapses many peers with the same · / +N convention as edge labels」。
+**位置**：viewer.js:178（`uniqJoin`）、viewer.js:190（`edgeLabel`）。
+**测试**：`test/layout.test.js` —「edgeLabel dedupes and truncates at 3 unique labels」、「edgeLabel aggregates per language (labels are prose and go through pick)」、「bilingual fixture writes mid-point labels as action phrases, per language」、「port list collapses many peers with the same · / +N convention as edge labels」、「uniqJoin takes a per-surface cap, defaulting to the narrow surface two」。
 
 ---
 
@@ -182,10 +182,10 @@ layer[v] = max(layer[v], layer[u] + 1)
 
 **关键约束**：`collapse` 只影响**分组键**，`conns` 里始终保留原始 connection。这个约束是踩坑换来的——早期版本把 `conns` 也换成折叠后的端点，导致点端口打开清单时报 `Cannot read properties of undefined`（真实模块 id 被换成了 group id，`M[id]` 取不到）。
 
-**同向自环**：折叠后 `from === to` 的边（组内边在顶层视图下）**不进顶层**，由调用方过滤（viewer.js:881，`renderA` 里折叠时就地丢掉）。
+**同向自环**：折叠后 `from === to` 的边（组内边在顶层视图下）**不进顶层**，由调用方过滤（viewer.js:957，`renderA` 里折叠时就地丢掉）。
 
 **复杂度**：O(E)。
-**位置**：viewer.js:191（`aggregateEdges`）。
+**位置**：viewer.js:197（`aggregateEdges`）。
 **测试**：`test/layout.test.js` —「aggregateEdges merges same-direction connections into one edge」、「aggregateEdges collapse groups parallel member edges, conns keep real endpoints」。
 
 ---
@@ -218,5 +218,5 @@ layer[v] = max(layer[v], layer[u] + 1)
 **清单行故意不可点**：「点开某一条 connection、再退回上一层」属于弹窗合并那一票，不在本步。此处只把四段平铺出来。
 
 **复杂度**：O(E)，E = 该边的 connection 数。
-**位置**：viewer.js:538（`pickPart`）、viewer.js:551（`fourPartRows`）、viewer.js:564（`modName`）、viewer.js:572（`fourPartHtml`）。
+**位置**：viewer.js:609（`pickPart`）、viewer.js:622（`fourPartRows`）、viewer.js:635（`modName`）、viewer.js:643（`fourPartHtml`）。
 **测试**：`test/layout.test.js` —「pickPart reads one of the four fixed segments by language」、「fourPartRows groups a folded edge by source module, keeping IR order」、「fourPartHtml lists all four segments of every connection, grouped by source module」、「a connection without a description renders an explicit dash for each segment」。
