@@ -33,31 +33,34 @@
 | 3 | `lineCap` 可容字符数 | 文本 | viewer.js:34 |
 | 4 | `wrap2` 两行折行 | 文本 | viewer.js:40 |
 | 5 | `cutGuard` 代理对边界修正 | 文本 | viewer.js:26 |
-| 6 | 三色标记 DFS 找后向边 | 图 | viewer.js:144 |
-| 7 | Kahn 拓扑排序 + 最长路分层 | 图 | viewer.js:159 |
-| 8 | 重心法（barycenter）交叉最小化 | 图 | viewer.js:189 |
-| 9 | 稳定排序（位次兜底） | 图 | viewer.js:189 |
-| 10 | 弱连通分量分解 | 图 | viewer.js:112 |
-| 11 | 首适应装箱（first-fit row packing） | 图 | viewer.js:258 |
-| 12 | 端口计数（`×N` = 内容种数） | 图 | viewer.js:138 |
-| 13 | 标签/对端去重 + 截断（`uniqJoin`） | 图 | viewer.js:167 |
-| 14 | 有序哈希聚合（含 collapse 折叠） | 图 | viewer.js:99 |
-| 15 | 三次贝塞尔前向边 | 几何 | viewer.js:338 |
-| 16 | 反馈弧复合路径 | 几何 | viewer.js:344 |
-| 17 | 行几何（层高 + 行内居中） | 几何 | viewer.js:226 |
-| 18 | 区域堆叠 + 尾随网格带 | 几何 | viewer.js:361 |
-| 19 | 白描边文字（`paint-order`） | 几何 | viewer.js:354 |
-| 20 | SVG marker 箭头（`orient="auto"`） | 几何 | viewer.js:332 |
-| 21 | 光标锚定滚轮缩放 | 视图 | viewer.js:484 |
-| 22 | 拖拽平移 + 3px 点击阈值 | 视图 | viewer.js:459 |
-| 23 | 双击 fit（含缩放钳制） | 视图 | viewer.js:476 |
-| 24 | 引用完整性检查 | 校验 | validate.js:124 |
-| 25 | 词边界正则存在性检查 | 校验 | validate.js:174 |
-| 26 | 空白归一化子串匹配 | 校验 | validate.js:182 |
-| 27 | HTML 转义 + JSON 内联转义 | 渲染 | render.js:114 / viewer.js:9 |
+| 6 | 三色标记 DFS 找后向边 | 图 | viewer.js:240 |
+| 7 | Kahn 拓扑排序 + 最长路分层 | 图 | viewer.js:262 |
+| 8 | 重心法（barycenter）交叉最小化 | 图 | viewer.js:275 |
+| 9 | 稳定排序（位次兜底） | 图 | viewer.js:279 |
+| 10 | 弱连通分量分解 | 图 | viewer.js:202 |
+| 11 | 首适应装箱（first-fit row packing） | 图 | viewer.js:348 |
+| 12 | 端口计数（`×N` = 内容种数） | 图 | viewer.js:142 |
+| 13 | 标签/对端去重 + 截断（`uniqJoin`） | 图 | viewer.js:171 |
+| 14 | 有序哈希聚合（含 collapse 折叠） | 图 | viewer.js:189 |
+| 15 | 三次贝塞尔前向边 | 几何 | viewer.js:534 |
+| 16 | 反馈弧复合路径 | 几何 | viewer.js:540 |
+| 17 | 行几何（层高 + 行内居中） | 几何 | viewer.js:229 |
+| 18 | 区域堆叠 + 尾随网格带 | 几何 | viewer.js:651 |
+| 19 | 白描边文字 + 标签白底衬（`paint-order`） | 几何 | viewer.js:566 |
+| 20 | SVG marker 箭头（`orient="auto"`） | 几何 | viewer.js:621 |
+| 21 | 光标锚定滚轮缩放 | 视图 | viewer.js:751 |
+| 22 | 拖拽平移 + 3px 点击阈值 | 视图 | viewer.js:726 |
+| 23 | 双击 fit（含缩放钳制） | 视图 | viewer.js:769 |
+| 24 | 引用完整性检查 | 校验 | validate.js:177 |
+| 25 | 词边界正则存在性检查 | 校验 | validate.js:234 |
+| 26 | 空白归一化子串匹配 | 校验 | validate.js:242 |
+| 27 | HTML 转义 + JSON 内联转义 | 渲染 | render.js:120 / viewer.js:9 |
 | 28 | 双语取值 `pick` / `pickList` | 渲染 | viewer.js:71 |
 | 29 | UI 文案表 `T` + `tr` / `fmt` | 渲染 | viewer.js:86 |
-| 30 | 端口清单去重（行数 = 内容种数） | 图 | viewer.js:431 |
+| 30 | 端口清单去重（行数 = 内容种数） | 图 | viewer.js:441 |
+| 31 | 可点边单元（加宽命中路径 + `<title>` hover 提示） | 几何 | viewer.js:576 / viewer.js:587 |
+| 32 | 四段说明清单（按来源模块分组 + 缺段显式「—」） | 图 | viewer.js:513 |
+| 33 | 四段说明校验（语言在外、四格在内） | 校验 | validate.js:31 |
 
 ## 待实现
 
@@ -68,6 +71,8 @@
 
 （**双语切换**已落地，见 `rendering.md` §3：`pick` 取值 + viewer 内 `T` 文案表 + header 切换器。）
 （**端点外移**已落地，见 `geometry.md` §1/§2：入边终点抬到目标盒上边缘上方 `PORT_GAP = 8` px。）
+（**可点边 + 四段说明**已落地，见 `rendering.md` §3/§5、`graph.md` §10、`validation.md` §5：一条边是一个 `<g class="edge">`（加宽命中路径 + `<title>`），点开弹四段；`connection.description` 此刻是**可选**字段，`generated/` 里那份产物还没有它——「每条 connection 四段齐全」是契约步的事。）
+（**行号**：本表随改动重核过一轮；此后若代码再变，照 ADR-0012 以**函数名**为准。）
 
 ## 已知的复杂度隐患
 

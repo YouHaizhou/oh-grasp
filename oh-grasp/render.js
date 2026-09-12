@@ -59,6 +59,7 @@ const CSS = `
   .vA-src { font-family: var(--mono); font-size: 12px; line-height: 1.5; background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 12px 14px; overflow-x: auto; margin: 0 0 16px; white-space: pre; }
   .vA-zoom-badge { position: absolute; top: 10px; right: 12px; font-size: 11px; color: var(--faint); background: #fff; border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; }
   .node { cursor: pointer; }
+  .edge { cursor: pointer; }
   .node rect { transition: stroke .1s, fill .1s; }
   .node:hover rect { stroke: var(--accent); }
   .node.sel rect { stroke: var(--accent); stroke-width: 1.5; fill: #eef2ff; }
@@ -91,6 +92,13 @@ const CSS = `
   .vA-pp-mod { font-family: var(--mono); font-weight: 600; }
   .vA-pp-arrow { color: var(--faint); }
   .vA-pp-lab { color: var(--accent-deep); }
+  .vA-fp-src { font-family: var(--mono); font-size: 13px; font-weight: 600; margin: 14px 0 6px; }
+  .vA-fp-conn { background: var(--canvas); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; }
+  .vA-fp-flow { font-family: var(--mono); font-size: 12px; color: var(--accent-deep); margin-bottom: 6px; }
+  .vA-fp-part { display: flex; gap: 10px; padding: 3px 0; font-size: 13px; line-height: 1.6; }
+  .vA-fp-cap { flex: 0 0 52px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); padding-top: 1px; }
+  .vA-fp-txt { flex: 1; color: var(--muted); }
+  .vA-fp-none { color: var(--faint); }
 
   /* ===== B · Index ===== */
   .vB { max-width: 960px; margin: 0 auto; padding: 48px 32px; }

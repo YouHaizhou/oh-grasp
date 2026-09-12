@@ -26,13 +26,13 @@
 
 若 IR 里任何字符串含 `</script>`（源码注释里写一句「见 </script>」就够了），浏览器会在此处**提前闭合** script 标签，后面的 JSON 变成页面文本，整个产物崩掉。
 
-**做法**（render.js:114）：`JSON.stringify(ir, null, 2).replace(/</g, '\\u003c')`
+**做法**（render.js:120）：`JSON.stringify(ir, null, 2).replace(/</g, '\\u003c')`
 
 JSON 里 `<` 是合法的转义目标——`<` 与 `<` 在 JSON 语义上完全等价，`JSON.parse` 后得到同一个字符。但**文本上**不再存在 `<`，`</script>` 也就无法形成。
 
 **为什么只转 `<` 不转全部**：`<` 是唯一能开启标签的字符，也是唯一有风险的那个。只转它，JSON 还能保持可读（人打开产物 `view-source` 看 IR 时不会被满屏 `\uXXXX` 淹没）。
 
-**位置**：render.js:114 / viewer.js:9。
+**位置**：render.js:120 / viewer.js:9（转义函数本体在 render.js:5 `escapeHtml`）。
 
 ---
 
@@ -53,7 +53,7 @@ JSON 里 `<` 是合法的转义目标——`<` 与 `<` 在 JSON 语义上完全�
 
 **viewer 在启动时读一次**：`const VIEWER_SRC = fs.readFileSync(...)` 在模块顶层。viewer.js 改动后**必须重新渲染产物**才会生效——这是产物是「快照」而非「引用」的必然结果。
 
-**位置**：render.js:112（`render`）、render.js:143（CLI）。
+**位置**：render.js:118（`render`）、render.js:148（CLI）。
 
 ---
 
@@ -70,13 +70,26 @@ JSON 里 `<` 是合法的转义目标——`<` 与 `<` 在 JSON 语义上完全�
 
 浏览器里整段执行（两个条件都真）；Node 里 `document` 未定义，下部整段跳过，上部导出可用。
 
-**导出清单**：`fitWidth, wrap2, pick, pickList, T, tr, fmt, edgeLabel, uniqJoin, countPorts, aggregateEdges, components, flowGeometry, gridGeometry, nodeSvg, fwdPath, feedbackPath, unitName, portRows, portListHtml`——即所有纯算法函数与文案表，外加纯字符串的渲染内核（盒体、边路径、端口清单）。**`nodeSvg` / `fwdPath` / `feedbackPath` 本来写在门内**（它们不碰 `document`，只是位置不对），端口口径与外移端点都落在它们身上，搬出 document 门才断言得到（`render()` 只产 HTML 外壳，从不生成盒体）。端口清单同理：行数据（`portRows`）与行 HTML（`portListHtml`）都在内核，DOM 门里只剩「把这份 HTML 塞进弹窗 + 绑关闭事件」。
+**导出清单**：`fitWidth, wrap2, pick, pickList, T, tr, fmt, edgeLabel, uniqJoin, countPorts, aggregateEdges, components, flowGeometry, gridGeometry, nodeSvg, fwdPath, feedbackPath, fwdEdgeSvg, backEdgeSvg, unitName, portRows, portListHtml, pickPart, fourPartRows, fourPartHtml`——即所有纯算法函数与文案表，外加纯字符串的渲染内核（盒体、边、端口清单、四段清单）。**`nodeSvg` / `fwdPath` / `feedbackPath` / `fwdEdgeSvg` / `backEdgeSvg` 本来写在门内**（它们不碰 `document`，只是位置不对），端口口径、外移端点、边的可点结构都落在它们身上，搬出 document 门才断言得到（`render()` 只产 HTML 外壳，从不生成盒体）。端口清单同理：行数据（`portRows`）与行 HTML（`portListHtml`）都在内核，DOM 门里只剩「把这份 HTML 塞进弹窗 + 绑关闭事件」；四段说明（`pickPart` / `fourPartRows` / `fourPartHtml`）按同样的分家方式处理。
 
-**语言怎么进去**：语言**不是**内核状态，而是参数。`pick(field, lang)` 收口全部散文字段（`{zh, en}` 按语言取值，旧形态的普通字符串原样返回），`edgeLabel(e, lang)`、`nodeSvg(id, x, y, counts, lang, M, G)`、`flowSvg(ids, edges, counts, lang)`、`portListHtml(id, dir, edges, lang, M, G)` 逐层把它传下去。`nodeSvg` / `portListHtml` 额外收模型索引 `M` / `G`（内核不持有模型，测试才好直接喂数据）。DOM 应用把当前语言放在 `state.lang`（不持久化），点 header 的 `#langZh` / `#langEn` 就换值并整页重渲染。`T = {zh, en}` 是查看器固定文案表（输入/输出/依赖/内部数据流/边界数据流/GROUP/INTERNAL/空方向「—」/弹窗分节标题/提示行），`tr(lang, key)` 取它，`fmt(tpl, n)` 填 `{n}` 占位——它在内核里，因此「两种语言的键一一对应」可单测。
+**一条边 = 一个可点单元**（ADR-0010）：整条边是**一个** `<g class="edge" data-from="…" data-to="…">`，组里依次是
 
-**这条分界的价值**：`oh-grasp/test/layout.test.js` 的 39 个测试全部直接 `require('../viewer.js')`，零 DOM 依赖、毫秒级。DOM 那一层的正确性由另一套东西兜——`oh-grasp/fortest/smoke-viewer.js` 用最小 DOM 桩跑完整装载路径（见下）。
+| 子元素 | 作用 |
+|---|---|
+| `<path>` 可见路径 | 视觉权重不变（`stroke-width="1.5"`，反馈弧照旧橙色虚线） |
+| `<path>` 命中路径 | `stroke="transparent" stroke-width="14" pointer-events="stroke"`——把「线」加宽成「带」，鼠标不必压在 1.5px 上 |
+| `<rect class="edge-hit-label" fill="#ffffff">` + `<text>` | 中点标签的白底衬 + 描边文字（见 geometry.md §5） |
+| `<title>` | 原生 hover 提示，内容是**未截断**的整句（画布上的字仍按 `fitWidth` 截断） |
 
-**位置**：viewer.js:483（分界）、viewer.js:897（导出）。
+**为什么身份挂在组上**：命中区、白底衬、文字、hover 提示是四个子元素，点击落在哪一个都该打开同一条边。DOM 门里的 `bindEdges` 因此只做一件事——把 `click` 绑在 `<g class="edge">` 上，用 `data-from|data-to` 回查真实 connection（`conns` 里存的是原始端点，见 graph.md 第 9 节）。`title` 也照此办：`nodeSvg` 的第一条子元素是 `<title>`，所以 hover 一个盒子看到的是**完整名字**（盒里那个是截断过的）。
+
+**语言怎么进去**：语言**不是**内核状态，而是参数。`pick(field, lang)` 收口全部散文字段（`{zh, en}` 按语言取值，旧形态的普通字符串原样返回），`edgeLabel(e, lang)`、`nodeSvg(id, x, y, counts, lang, M, G)`、`flowSvg(ids, edges, counts, lang)`、`portListHtml(id, dir, edges, lang, M, G)`、`fourPartHtml(edge, lang, M)` 逐层把它传下去。`nodeSvg` / `portListHtml` / `fourPartHtml` 额外收模型索引 `M` / `G`（内核不持有模型，测试才好直接喂数据）。DOM 应用把当前语言放在 `state.lang`（不持久化），点 header 的 `#langZh` / `#langEn` 就换值并整页重渲染。`T = {zh, en}` 是查看器固定文案表（输入/输出/依赖/内部数据流/边界数据流/GROUP/INTERNAL/空方向「—」/连线/四段说明/四段字段名/弹窗分节标题/提示行），`tr(lang, key)` 取它，`fmt(tpl, n)` 填 `{n}` 占位——它在内核里，因此「两种语言的键一一对应」可单测。
+
+**这条分界的价值**：`oh-grasp/test/layout.test.js` 的 49 个测试全部直接 `require('../viewer.js')`，零 DOM 依赖、毫秒级。DOM 那一层的正确性由另一套东西兜——`oh-grasp/fortest/smoke-viewer.js` 用最小 DOM 桩跑完整装载路径（见下）。
+
+**分界的边界（诚实的缺口）**：可点边与四段的**数据与字符串**全在内核，所以「边单元长什么样、中点写什么、四段怎么分组」都断言得到；但「点下去真的弹出来」「Esc 真的关得掉」「hover 真的显 title」是**浏览器行为**，内核断言盖不到。这三条目前只有 scratch 冒烟脚本量过（见第 4 节），没有入库的自动缝。
+
+**位置**：viewer.js:600（分界）、viewer.js:1051（导出）。
 
 ---
 
@@ -94,3 +107,26 @@ JSON 里 `<` 是合法的转义目标——`<` 与 `<` 在 JSON 语义上完全�
 **不入库的原因**：它是脚手架的脚手架——为了让一套不严谨的 DOM 桩工作，桩本身需要不少妥协（例如 `clientWidth` 按 id 硬编码）。它的价值是开发时抓回归，不是长期资产；被它抓到的问题都已固化成 `layout.test.js` 里的纯内核断言或 render 层的字符串断言。
 
 **位置**：`oh-grasp/fortest/smoke-viewer.js`。
+
+### 交互行为的覆盖缺口（写在这里，免得下次又以为「有测试」）
+
+可点边那次改动是照上面这条手艺验的：另写了一份临时脚本（在仓库外，**不入库**），用同一套 DOM 桩加了 `data-from` / `data-to` 的抓取，跑通「点边 → 四段弹窗（中/英）」「Esc 关闭」「子图里的边」「反馈弧」「真实产物 47 条无 description 的边条条点得开且不抛错」这五组。结论可信，但**它不是自动缝**——脚本删了就没了，`node --test` 也不会因为 Esc 或 hover 坏掉而变红。这两条（`Esc` 关闭、`<title>` 真机 hover）目前**没有入库的自动覆盖**。
+
+---
+
+## 5. 弹窗与关闭（DOM 层）
+
+**问题**：三个弹窗（模块详情 / 组子图 / 边四段）共用同一个 `#detailOverlay`，而切换语言会**整页重渲染**——监听器若挂在被换掉的元素上，就会随元素一起消失或越挂越多。
+
+**做法**：两根线各管一头
+
+| 线 | 位置 | 干什么 |
+|---|---|---|
+| 内容 | DOM 门内 | `openEdge(e)` 把四段清单 HTML 塞进 `#detailOverlay` 并 `.classList.add('open')`；`bindEdges(container, edges, controller)` 只管给容器里每个 `<g class="edge">` 挂 `click` |
+| 关闭 | 门内的槽位（但**不在** `renderA` 内） | `closeOverlay`（`var closeOverlay = null`）由每次 `renderA` 末尾刷成新的 `closeDetail`；`document` keydown 监听器在门的自启动 IIFE 里**只注册一次**（不像 `bindEdges` 那样每次 `renderA` 重挂），按 `Esc` 就调 `closeOverlay()` |
+
+为什么绕这么一圈：`document` 上的 keydown 不能每次重渲染都加一个（切十次语言就有十个监听器），而 `closeDetail` 又必须是最新那棵树上的函数——一个可变槽位是两头都能满足的最小写法。点弹窗背景（`e.target === detail`）也走同一个 `closeDetail`。
+
+**拖拽阈值同样适用**：`bindEdges` 先看 `controller.moved`（见 viewport.md 的 3px 阈值）——拖动画布时顺手扫过一条边，不该弹出四段。节点与端口上的 `click` 也照此办。
+
+**位置**：viewer.js:612（`closeOverlay` 槽位）、viewer.js:846（`openEdge`）、viewer.js:861（`bindEdges`）、viewer.js:958（背景点击关闭）、viewer.js:973（`renderA` 里绑定边）、viewer.js:976（槽位刷新）、viewer.js:1038（`Esc`）。

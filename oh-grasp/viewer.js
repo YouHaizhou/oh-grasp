@@ -93,6 +93,8 @@
       innerFlow: '内部数据流', boundary: '边界数据流', members: '成员模块',
       none: '无', dash: '—', feedback: '反馈',
       groupTag: 'GROUP', internalTag: 'INTERNAL',
+      edge: '连线', fourParts: '四段说明',
+      fp_source: '来源', fp_process: '处理', fp_output: '输出', fp_purpose: '用途',
     },
     en: {
       input: 'Input', output: 'Output',
@@ -103,6 +105,8 @@
       innerFlow: 'Internal data flow', boundary: 'Boundary data flow', members: 'Member modules',
       none: 'None', dash: '—', feedback: 'feedback',
       groupTag: 'GROUP', internalTag: 'INTERNAL',
+      edge: 'Connection', fourParts: 'Four-part description',
+      fp_source: 'Source', fp_process: 'Process', fp_output: 'Output', fp_purpose: 'Purpose',
     }
   };
   // 取当前语言的 UI 文案；语言非法时按 zh。
@@ -369,6 +373,11 @@
      盒子里画了什么、线接在哪，只有这里的断言能兜住（render() 只产 HTML 外壳）。
      =================================================================== */
 
+  /* ---------- 悬停提示：原生 <title>（ADR-0010） ----------
+     hover 只给**当前语言**的一句轻提示：节点显全名、边显中点短语。用原生 title 而不是自绘浮层——
+     盒里的名字是 fitWidth 截断过的（`GDX` / 长名），hover 看全名是它的真实用处。 */
+  function titleTag(text) { return text ? '<title>' + esc(text) + '</title>' : '<title></title>'; }
+
   /* ---------- 节点盒 ---------- */
   // id: 单元 id；counts: countPorts 的结果（只对 group 生效）；M / G: 模块 / 分组索引
   // （调用方传进来——内核不持有模型，因此这里能拿测试数据直接调）；lang: 'zh' | 'en'。
@@ -380,7 +389,8 @@
     var desc = pick(isGrp ? g.description : m.description, lang);
     var nameFs = 14, descFs = 12;
     var maxW = w - 34;
-    var s = '';
+    // 返回值会被 flowSvg 包进 `<g class="node">`，所以这条 <title> 就是那个组的 hover 提示。
+    var s = titleTag(name);
     if (isGrp) {
       s += '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="12" fill="#eef2ff" stroke="#c7d2fe" stroke-width="1"/>';
       s += '<text x="' + (x + 16) + '" y="' + (y + 18) + '" font-size="8.5" letter-spacing="1.5" fill="#6366f1">' + esc(tr(lang, 'groupTag')) + '</text>';
@@ -457,6 +467,67 @@
     }).join('');
   }
 
+  /* ---------- 四段说明（点边弹出）----------
+     IR 里每条 connection 上的四段：source（从哪来）/ process（经过什么处理）/
+     output（输出了什么）/ purpose（用于什么），中英各一套（ADR-0008）。四个字段名固定。
+     画布中点只放 label 那一句短语，四段是点开才看的数据——两者刻意分开（CONTEXT.md 的 `_Avoid_`：
+     别把四段当成「边注释」，注释是图上的文字，四段是 IR 里的数据）。 */
+  var FOUR_KEYS = ['source', 'process', 'output', 'purpose'];
+
+  // 一种语言下的一段。缺当前语言时回退默认语言，再回退另一种——与 pick 同一条 expand 期脚手架：
+  // 契约步的双语硬校验上线后，这条回退分支不可达（与票 08 对 pick 的记录同源）。
+  function pickPart(desc, lang, key) {
+    if (!desc || typeof desc !== 'object') return '';
+    var order = [normLang(lang), DEFAULT_LANG, 'en'];
+    for (var i = 0; i < order.length; i++) {
+      var sub = desc[order[i]];
+      if (sub && typeof sub === 'object' && hasText(sub[key])) return sub[key];
+    }
+    return '';
+  }
+
+  /* 聚合边的行数据：按**来源模块**分组，组内保 IR 顺序。
+     顶层折叠后，组内成员的那些原子 connection 在画布上没有可见的那条线——这份清单是它们
+     唯一的到达路径，所以「每条 connection 都要露脸」是这里的硬要求，不是装饰。 */
+  function fourPartRows(edge) {
+    // 键是模块 id（用户数据），普通 {} 会被 "constructor" 这类 id 命中内置属性，故用无原型对象。
+    var bySrc = Object.create(null), out = [];
+    ((edge && edge.conns) || []).forEach(function (cn) {
+      if (!cn) return;
+      var g = bySrc[cn.from];
+      if (!g) { g = bySrc[cn.from] = { id: cn.from, conns: [] }; out.push(g); }
+      g.conns.push(cn);
+    });
+    return out;
+  }
+
+  // 单元显示名（模块名是源码标识符，不译）。仅用于四段清单里的来源/去向；取不到就退回 id。
+  function modName(id, M) {
+    var m = M && M[id];
+    return m ? m.label : String(id);
+  }
+
+  // 四段清单的 HTML：每组一个来源模块标题，组内每条 connection 一段「流向 + 四段」。
+  // 缺 description（真实产物此刻就是）时每段显式画「—」——静默留白会让人以为那条线没有用途。
+  // 清单行**不可点**：「点开某条 connection」是票 05 的事（弹窗合并 + 一层返回）。
+  function fourPartHtml(edge, lang, M) {
+    var groups = fourPartRows(edge);
+    if (!groups.length) return '<div class="vA-empty">' + esc(tr(lang, 'none')) + '</div>';
+    return groups.map(function (g) {
+      return '<div class="vA-fp-src">' + esc(modName(g.id, M)) + '</div>' +
+        g.conns.map(function (cn) {
+          var parts = FOUR_KEYS.map(function (k) {
+            var txt = pickPart(cn.description, lang, k);
+            return '<div class="vA-fp-part"><span class="vA-fp-cap">' + esc(tr(lang, 'fp_' + k)) + '</span>' +
+              '<span class="vA-fp-txt' + (txt ? '' : ' vA-fp-none') + '">' +
+              esc(txt || tr(lang, 'dash')) + '</span></div>';
+          }).join('');
+          return '<div class="vA-fp-conn"><div class="vA-fp-flow">' + esc(pick(cn.label, lang)) +
+            ' → ' + esc(modName(cn.to, M)) + '</div>' + parts + '</div>';
+        }).join('');
+    }).join('');
+  }
+
   /* ---------- 边（前向 + 反馈）路径 ---------- */
   // 入边终点落在目标盒上边缘**上方** PORT_GAP px（即端口圆点外缘之上），箭头才不会被后画的
   // 盒体 / 端口圆点盖住（ADR-0009）。层序不动：节点仍画在边之后，只让箭头露出来。
@@ -476,6 +547,52 @@
     return { d: d, mid: (y1 + y2) / 2 };
   }
 
+  /* ---------- 边的可点单元（ADR-0010） ----------
+     一条边 = 一个 `<g class="edge" data-from data-to>`，里面装三样东西：
+       · 可见路径：stroke-width 1.5，**视觉粗细不变**（读者看到的还是那条细线）；
+       · 命中路径：同一条 d 再来一遍，描边加宽但透明——细线点不中，命中区靠它；
+       · 中点标签：白色底衬矩形 + 文本（底衬既是可读性垫底，也是命中区的一部分）。
+     外加 `<title>`：hover 给当前语言的整句（画出来那段可能是 fitWidth 截断过的）。
+     边的身份挂在组上：真实浏览器里点命中路径或底衬都会冒泡到同一个组，DOM 层据此认出是哪条边。 */
+  var HIT_W = 14;          // 命中路径的描边宽（像素）：够宽好点，又不会被误当成视觉元素
+  var EDGE_LABEL_W = 240;  // 前向边中点标签的可用宽（fitWidth 截断）
+  function n1(n) { return Math.round(n * 10) / 10; }   // 一位小数：免得浮点噪声写进产物
+  // 透明加宽的那条路径。pointer-events="stroke" 让它在没有颜色时也吃点击。
+  function hitPath(d) {
+    return '<path d="' + d + '" fill="none" stroke="transparent" stroke-width="' + HIT_W + '" pointer-events="stroke"/>';
+  }
+  // 中点标签：白色底衬按**画出来的那段**文字定宽（截断后），不是按整句——否则底衬会盖住整条边。
+  // 文本仍带白色描边（paint-order:stroke），底衬与它叠在一起就是「白底衬」的观感。
+  function edgeLabelParts(text, x, y, fs, anchor, fill) {
+    var w = 0;
+    for (var i = 0; i < text.length; i++) w += chW(text[i], fs);
+    var padX = 3;
+    var x0 = anchor === 'end' ? x - w : (anchor === 'middle' ? x - w / 2 : x);
+    return '<rect class="edge-hit-label" x="' + n1(x0 - padX) + '" y="' + n1(y - fs * 0.85) +
+      '" width="' + n1(w + padX * 2) + '" height="' + n1(fs * 1.15) + '" fill="#ffffff" pointer-events="all"/>' +
+      '<text x="' + n1(x) + '" y="' + n1(y) + '" text-anchor="' + anchor + '" font-size="' + fs + '" fill="' + fill +
+      '" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke">' + esc(text) + '</text>';
+  }
+  function fwdEdgeSvg(e, p, label, markerId) {
+    var shown = fitWidth(label, 11, EDGE_LABEL_W);
+    var s = '<g class="edge" data-from="' + esc(e.from) + '" data-to="' + esc(e.to) + '">';
+    s += '<path d="' + p.d + '" fill="none" stroke="#b6c2d1" stroke-width="1.5" marker-end="url(#' + markerId + ')"/>';
+    s += hitPath(p.d);
+    if (shown) s += edgeLabelParts(shown, p.xm, p.my - 4, 11, 'middle', '#475569');
+    s += titleTag(label);
+    return s + '</g>';
+  }
+  // 反馈弧：标签走右侧车道，右对齐；`↺ ` 前缀标记它是回边（title 里也带，好让 hover 与画面一致）。
+  // laneW 是车道宽，标签在这里面 fitWidth 截断。
+  function backEdgeSvg(e, d, label, lx, ly, laneW, markerId) {
+    var s = '<g class="edge" data-from="' + esc(e.from) + '" data-to="' + esc(e.to) + '">';
+    s += '<path d="' + d + '" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#' + markerId + ')"/>';
+    s += hitPath(d);
+    if (label) s += edgeLabelParts('↺ ' + fitWidth(label, 10, laneW - 26), lx, ly, 10, 'end', '#b45309');
+    s += titleTag(label ? '↺ ' + label : '');
+    return s + '</g>';
+  }
+
   /* ===================================================================
      以下为浏览器端 DOM 应用（需 #oh-grasp-ir 内嵌 JSON + #root 等骨架）。
      Node 环境（单测 / 语法检查）没有 document，整段跳过。
@@ -490,6 +607,9 @@
 
   // 语言是阅读偏好，不做持久化，每次打开都是默认中文。
   var state = { lang: DEFAULT_LANG };
+  // 当前那一屏的「关弹窗」动作。renderA 每次渲染都换一个新的 overlay，把它的 closeDetail 放这里，
+  // 让 document 上的 keydown 只注册一次也能关到最新的那个（见 renderA 末尾与下面的 Esc 分支）。
+  var closeOverlay = null;
   // 切语言 = 换一个取值子树，立刻重渲染；非法语言忽略。
   function setLang(lang) {
     if (LANGS.indexOf(lang) === -1 || state.lang === lang) return;
@@ -503,9 +623,8 @@
     return { id: id, xml: '<marker id="' + id + '" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="' + color + '"/></marker>' };
   }
 
-  function haloText(txt, x, y, anchor) {
-    return '<text x="' + x + '" y="' + y + '" text-anchor="' + (anchor || 'middle') + '" font-size="11" fill="#475569" stroke="#ffffff" stroke-width="4" stroke-linejoin="round" paint-order="stroke">' + esc(txt) + '</text>';
-  }
+  // 中点标签的描边白底已并入内核的 edgeLabelParts（票 04）：原先这里另有一个 haloText，
+  // 只画字不画底衬，命中区只能落在 1.5px 的线宽上——点不中。函数已删，别再加回来。
 
   /* ---------- 合成一张完整 flow svg（顶层与子图共用同一内核） ---------- */
   // ids: 单元 id 数组；edges: 已聚合的 {from,to,conns}（子图 conns 长度 1）；
@@ -563,19 +682,15 @@
         var a = g.pos[e.from], b = g.pos[e.to];
         if (!a || !b) return;
         var pa = feedbackPath(a, b, g.sizes[e.from], g.sizes[e.to], g.gx);
-        var lbl = edgeLabel(e, lang);
-        if (!lbl) lbl = tr(lang, 'feedback');
-        part += '<path d="' + pa.d + '" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#' + mB.id + ')"/>';
-        part += '<text x="' + (g.Wc + g.lane - 10) + '" y="' + pa.mid + '" text-anchor="end" font-size="10" fill="#b45309">↺ ' + esc(fitWidth(lbl, 10, g.lane - 26)) + '</text>';
+        var lbl = edgeLabel(e, lang) || tr(lang, 'feedback');
+        part += backEdgeSvg(e, pa.d, lbl, g.Wc + g.lane - 10, pa.mid, g.lane, mB.id);
       });
       // 前向边 path + label
       g.fwd.forEach(function (e) {
         var a = g.pos[e.from], b = g.pos[e.to];
         if (!a || !b) return;
         var p = fwdPath(a, b, g.sizes[e.from], g.sizes[e.to]);
-        part += '<path d="' + p.d + '" fill="none" stroke="#b6c2d1" stroke-width="1.5" marker-end="url(#' + mF.id + ')"/>';
-        var lbl = edgeLabel(e, lang);
-        if (lbl) part += haloText(fitWidth(lbl, 11, 240), p.xm, p.my - 4, 'middle');
+        part += fwdEdgeSvg(e, p, edgeLabel(e, lang), mF.id);
       });
       // 节点最后画（层序不动，见 ADR-0009：入端已外移 PORT_GAP，箭头落在端口圆点上方露出来）
       g.layers.forEach(function (row) {
@@ -725,6 +840,34 @@
     }
     // 顶层单元的显示名：group 抽象名可译，模块名不译（实现搬进内核的 unitName）。
     function nameOf(id) { return unitName(id, lang, M, G); }
+    // 点边 → 四段说明。第三个弹窗（先照 openDetail / openGroup 的样子写；合并成一个组件是票 05）。
+    // 聚合边（conns 多条）列出其下**每条** connection 的四段，按来源模块分组——组内那些原子
+    // connection 在画布上没有可见的线，这里是它们唯一的到达路径（ADR-0008）。
+    function openEdge(e) {
+      if (!e) return;
+      detail.innerHTML = '<div class="vA-modal vA-modal-wide">' +
+        '<div class="vA-detail-head"><span class="vA-detail-name">' + esc(nameOf(e.from)) + ' → ' + esc(nameOf(e.to)) + '</span>' +
+        '<span class="vA-detail-kind">' + esc(tr(lang, 'edge')) + '</span>' +
+        '<button class="vA-detail-close" id="detailClose">×</button></div>' +
+        '<h4>' + esc(tr(lang, 'fourParts')) + '</h4>' + fourPartHtml(e, lang, M) +
+        '</div>';
+      detail.classList.add('open');
+      detail.querySelector('#detailClose').addEventListener('click', closeDetail);
+    }
+    // 边在画布上的身份 = from|to（聚合边的端点已折叠成顶层单元，conns 仍指向真实模块）。
+    // 命中区是整条路径 + 中点标签的白底衬，两者同在一个 <g class="edge"> 里，所以绑在组上：
+    // 真实浏览器里点哪个子元素都冒泡到这同一个组 = 同一条边（ADR-0010）。
+    // 子图有自己的一份边与自己的缩放控制器，所以容器与控制器都由调用方传进来。
+    function bindEdges(container, edges, controller) {
+      var byKey = {};
+      edges.forEach(function (e) { byKey[e.from + '|' + e.to] = e; });
+      container.querySelectorAll('.edge').forEach(function (g) {
+        g.addEventListener('click', function () {
+          if (controller.moved) { controller.moved = false; return; }   // 拖拽画布不算点边
+          openEdge(byKey[g.dataset.from + '|' + g.dataset.to]);
+        });
+      });
+    }
     function openDetail(id) {
       var m = M[id];
       detail.innerHTML =
@@ -768,6 +911,8 @@
             openDetail(n.dataset.id);
           });
         });
+        // 子图里的边同样可点（子图的边不折叠，每条 conns 长度 1）。
+        bindEdges(detail, innerEdges, sCtl);
       } else {
         var cards = members.map(function (m) {
           return '<button class="vA-mcard" data-id="' + esc(m.id) + '" type="button"><span class="vA-mcard-name">' + esc(m.label) + '</span><span class="vA-mcard-desc">' + esc(pick(m.description, lang)) + '</span></button>';
@@ -825,6 +970,10 @@
         openPort(p.dataset.id, p.dataset.port);
       });
     });
+    bindEdges(root, topEdges, ctl);
+    // Esc 关闭弹窗（ADR-0010）。document 上的监听器只注册一次，所以真正的关闭函数走这个槽位——
+    // 每次重渲染（切语言）都会换一个新的 #detailOverlay 和新的 closeDetail，不能各挂一个监听器。
+    closeOverlay = closeDetail;
   }
 
   /* ============ B · Index ============ */
@@ -884,6 +1033,12 @@
       document.getElementById('prev').addEventListener('click', function () { step(-1); });
       document.getElementById('next').addEventListener('click', function () { step(1); });
       document.addEventListener('keydown', function (e) {
+        // Esc 关弹窗（ADR-0010）：原来只有「点 ×」和「点遮罩空白」，键盘用户被困在弹窗里。
+        // 放在输入框判断之前——弹窗里没有输入框，而 Esc 在任何焦点下都该能退出。
+        if (e.key === 'Escape' || e.key === 'Esc') {
+          if (closeOverlay) closeOverlay();
+          return;
+        }
         var t = e.target;
         if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
         if (e.key === 'ArrowLeft') step(-1);
@@ -903,6 +1058,10 @@
       // 纯字符串渲染内核：盒体、边路径、端口清单（往上搬出 document 门，好让「画了什么」可断言）
       nodeSvg: nodeSvg, fwdPath: fwdPath, feedbackPath: feedbackPath,
       unitName: unitName, portRows: portRows, portListHtml: portListHtml,
+      // 边的可点单元：命中路径 + 中点标签 + hover title 合成同一个带边身份的组（ADR-0010）
+      fwdEdgeSvg: fwdEdgeSvg, backEdgeSvg: backEdgeSvg,
+      // 四段说明：取值、按来源模块分组的行数据、行 HTML（照 portRows / portListHtml 的分家方式）
+      pickPart: pickPart, fourPartRows: fourPartRows, fourPartHtml: fourPartHtml,
     };
   }
 })();

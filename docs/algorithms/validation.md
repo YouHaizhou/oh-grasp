@@ -24,7 +24,7 @@
 
 **穷尽报告而非首错退出**：一次跑完收集所有错误。模型改一轮就全部修好，比「改一个跑一次」快得多。
 
-**位置**：validate.js:124（connections）、validate.js:32-122（groups / modules）。
+**位置**：validate.js:177（connections）、validate.js:76–176（groups / modules）。
 
 ---
 
@@ -41,7 +41,7 @@
 
 **已知盲区**：词边界挡住前缀匹配，但挡不住**注释或字符串里出现过**同名文字（`// TODO: extractQualityArgs`）。要彻底解决需要真正的语法解析（把源码 parse 成 AST 再找标识符节点），代价远大于收益——注释里出现一个函数名的概率低，且即便发生，图上的名字仍然指向真实存在的东西。
 
-**位置**：validate.js:174。
+**位置**：validate.js:234（`identifierExists`，由 validate.js:211 的存在性检查块调用）。
 
 ---
 
@@ -55,7 +55,7 @@
 
 **与 #2 的分工**：#2 保证**名字对**，#3 保证**正文对**。两条一起，把「模型编造/改写源码」这个最大风险按在 render 之前。
 
-**位置**：validate.js:182。
+**位置**：validate.js:242（`sourceContains`）。
 
 ---
 
@@ -67,7 +67,37 @@
 
 **为什么只到「至少一种语言」**：这是 expand 步，只放宽不收口。「`zh` 与 `en` 都必填」是契约步的硬校验，两条刻意分开落地——`validate` 一收紧，`generated/` 里现有的单语 IR 就全线报错，而重新生成是用户手动做的，在实现之后。中间那段窗口里分不清「校验写错了」和「产物还没更新」。
 
-**位置**：validate.js 顶部的 `isTranslatable` / `isTranslatableArray`。
+**位置**：validate.js 顶部的 `isTranslatable` / `isTranslatableArray`（validate.js:13 / validate.js:19）。
+
+---
+
+## 5. 四段说明 `connection.description`（expand 步）
+
+**问题**：`connection` 上新增一段四段说明——`source`（从哪来）/ `process`（经过什么处理）/ `output`（输出了什么）/ `purpose`（用于什么），中英各一套。它**不是**第 4 节那种可译散文：散文是「一段话换个语言说」，四段是「四个固定格子」。校验口径因此也不同。
+
+```jsonc
+"description": { "zh": { "source": …, "process": …, "output": …, "purpose": … }, "en": { … } }
+```
+
+**做法**（`checkFourPart`）：**语言在外、四个固定字段名在内**。
+
+| 输入 | 结果 |
+|---|---|
+| `description` 缺席（`undefined` / `null`） | **放行**——「每条 connection 都要有四段」是契约步的硬要求，本步只做 expand |
+| `description` 出现但整体不是对象（如普通字符串） | `connections[i].description`：形状不对 |
+| 某个语言子树不是对象 | `connections[i].description.zh`：那一层形状不对 |
+| 某语言子树里缺某个固定字段 / 该字段不是非空字符串 | `connections[i].description.zh.process`：**精确到那一格** |
+| 两个语言子树都没有（如 `{}`） | `connections[i].description`：至少要有 zh / en 之一 |
+| 只写全了一个语言子树 | **放行**（同第 4 节的「至少一种语言」） |
+
+**为什么「缺席放行、半截报错」**：半截的 description 比没有更危险——写全了 `source` / `process` 却漏了 `purpose`，画布上那一格会**静默留白**，读者以为那条线没有用途。缺席至少能靠统一的「—」占位表达「这里本来就没有」。所以一旦出现，出现的那个语言子树就必须四段齐全。
+
+**与第 4 节的分工**：`translatable` 的叶子是**自由散文**（随便什么非空字符串都行），`description` 的叶子是**四个固定名字**——名字不许改叫 `origin` / `how` / `what` / `why`（会丢掉与用户原话的一一对应），而且单语产物里那种「普通字符串」在这里是**错的形状**，不会被悄悄放行。反过来，`connection.description` 也不该拿 `isTranslatable` 去套：那等于只检查「有字」，四个格子缺一个都发现不了。
+
+**为什么错误路径要精确到那一格**：错在哪一格，模型改哪一格。写成 `connections[3].description: invalid` 会让它重猜整段，而四段说明是这张图上唯一**不可从源码推出**的文字——只能回头问用户，猜不出来。
+
+**位置**：validate.js:31（`checkFourPart`）、validate.js:196（connections 循环里的可选调用）。
+**测试**：`oh-grasp/test/validate.test.js` —「connection description with all four segments in both languages passes」、「a connection without description still passes (expand step, not the contract step)」、「connection description missing one segment fails with the exact path」、「connection description with an empty segment fails」、「connection description must be an object, not a plain string」、「an empty connection description fails」、「a description language subtree that is not an object fails at the language」、「one complete language subtree is tolerated (bilingual-required is the contract step)」、「every connection of the bilingual fixture carries the four segments in both languages」。
 
 ---
 

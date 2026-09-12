@@ -38,7 +38,9 @@ M x1 y1  C x1 my  x2 my  x2 y2     my = (y1 + y2) / 2
 
 **为什么不用直线**：直线接入盒顶时是斜的，斜线在端口圆点附近会挤成一片，箭头方向也不明确。
 
-**位置**：viewer.js:463。
+**它产出的是「路径几何」，不是「边」**：`fwdPath` 只算 `d` 与中点 `{xm, my}`，把 `d`、中点、标签、命中路径、hover 提示拼成**一个可点单元**的是 `fwdEdgeSvg`（见 rendering.md §3）。
+
+**位置**：viewer.js:534。
 
 ---
 
@@ -60,7 +62,9 @@ M x1 y1  C x1 my  x2 my  x2 y2     my = (y1 + y2) / 2
 
 **通道宽度只在有反馈边时产生**（`lane = back.length ? 170 : 0`）——没有回边的图不该多出 170px 空白。
 
-**位置**：viewer.js:469。
+**与 `fwdPath` 一样**，它只算几何；拼成可点单元的是 `backEdgeSvg`（标签带 `↺` 前缀，`<title>` 里也是带前缀的整句，见 rendering.md §3）。
+
+**位置**：viewer.js:540。
 
 ---
 
@@ -77,7 +81,7 @@ M x1 y1  C x1 my  x2 my  x2 y2     my = (y1 + y2) / 2
 
 **为什么居中而不是左对齐**：分层图天然是中间宽两头窄的菱形（第一层和最后一层通常只有一两个盒子）。左对齐会让菱形歪向一边、左侧留白巨大，正是用户反馈里的「左右侧空白」问题的一个来源。
 
-**位置**：viewer.js:226。
+**位置**：viewer.js:229（行高与行内居中都在 `flowGeometry` 内）。
 
 ---
 
@@ -97,20 +101,31 @@ M x1 y1  C x1 my  x2 my  x2 y2     my = (y1 + y2) / 2
 
 网格带同理，多一个横向居中：`translate((contentW - grid.W) / 2, grid.top)`。
 
-**位置**：viewer.js:361。
+**位置**：viewer.js:651（区域堆叠游标，在 `flowSvg` 内）。
 **测试**：`oh-grasp/fortest/smoke-viewer.js` —「多弱连通分量堆叠为纵向独立 translate 区（不重叠）」（断言 ≥3 个 `translate` 且 y 各不相同、6 个节点各渲染一次）。
 
 ---
 
-## 5. 白描边文字（`paint-order: stroke`）
+## 5. 白描边文字 + 标签的白底衬
+
+### 看得清：`paint-order: stroke`
 
 **问题**：边标签压在两盒之间的连线上。普通文字会被线穿过，读不清——这正是用户反馈「连线上的字看不懂」的一部分（另一半是文字内容本身，见 ADR-0008 双语）。
 
 **做法**：给文字一份**白色描边**（`stroke: #ffffff; stroke-width: 4`）并把绘制顺序改成「先描边后填充」（`paint-order: stroke`）。描边在文字周围形成一圈白底，把底下的连线「擦掉」。
 
-**为什么不用 `<rect>` 垫底**：需要先量文字宽高才能画矩形，而宽度是估算的（见 text.md），估算误差会露出黑边或白边。`paint-order` 由渲染器按**实际字形**描边，零误差，且不增加 DOM 节点。
+**为什么不用 `<rect>` 垫底来保证可读**：需要先量文字宽高才能画矩形，而宽度是估算的（见 text.md），估算误差会露出黑边或白边。`paint-order` 由渲染器按**实际字形**描边，零误差，且不增加 DOM 节点。**这条理由到今天仍然成立**——可读性靠的始终是描边，不是垫底。
 
-**位置**：viewer.js:354。
+### 点得着：标签那层白底衬 `<rect class="edge-hit-label">`
+
+后来边上多了一个白底衬矩形（`fill="#ffffff" pointer-events="all"`），它**不是**用来擦线（那件事仍归描边），而是**命中区的一部分**（ADR-0010：一条边 = 一个可点单元）。理由很具体：
+
+- 中点文字画在路径**上方约 4px**（`y = p.my − 4`），而透明命中路径只有 `stroke-width="14"`（上下各 7px）——文字的**上半截落在带子外面**。没有这层矩形，「看见字就去点字」这一下会点空。
+- 矩形把「文字占的那块地方」也纳入可点范围，点击冒泡到同一个 `<g class="edge">`，于是字、线、衬三处点哪个都开同一条边。
+
+**它与上面那条理由的关系**：矩形的宽高确实是用**估值**算的（`edgeLabelParts` 里的 `chW` 累加，与 `fitWidth` 截断用同一把尺子），所以它比字形略宽或略窄是可能的。但误差的后果从「文字读不清」降级成了「白底衬边缘多出或少掉一两个像素」——文字本身仍有精确的描边兜着。**取舍：拿一点点视觉精度换一整块可点面积，值。** 这条估算误差目前只在真机上看得到，没有自动断言（见 rendering.md 第 4 节的覆盖缺口）。
+
+**位置**：viewer.js:566（`edgeLabelParts`，描边文字与白底衬在这里一起产出）；描边文字在 `fwdEdgeSvg` / `backEdgeSvg` 两处使用（viewer.js:576 / viewer.js:587）。
 
 ---
 
@@ -122,7 +137,7 @@ M x1 y1  C x1 my  x2 my  x2 y2     my = (y1 + y2) / 2
 
 **为什么不用手工画三角形**：手工画要自己算切线角度（贝塞尔端点的切线是控制点连线方向），且箭头位置要留出路径缩短量。`marker` 是 SVG 原生能力，`refX` 负责把箭尖对齐到路径终点。
 
-**位置**：viewer.js:332。
+**位置**：viewer.js:621（`markerDef`）。
 
 ---
 
@@ -138,4 +153,6 @@ M x1 y1  C x1 my  x2 my  x2 y2     my = (y1 + y2) / 2
 
 **点开端口**（`portRows` / `portListHtml`）：每行 `源 → 内容 → 目标`，行数 === 盒上那个 `×N`（同一把 zh 去重键），对端去重后按 `uniqJoin` 收尾——详见 graph.md 第 7 节。清单是运行时 DOM，不进产物。
 
-**位置**：viewer.js:375（`nodeSvg`）、viewer.js:411（`portMark`）、viewer.js:422（`unitName`）、viewer.js:431（`portRows`）、viewer.js:450（`portListHtml`）。
+**hover 提示**（`<title>`）：`nodeSvg` 的第一条子元素是一条 `<title>`，内容是**未截断的完整名字**（盒里那行是 `fitWidth` 截断过的）。名字被截断时，读者把鼠标停上去就能读全——截断只影响画布上的排版，不影响能不能读到名字。返回的字符串会被 `flowSvg` 包进 `<g class="node">`，所以这条 `<title>` 就是这个组的 hover 提示。
+
+**位置**：viewer.js:384（`nodeSvg`）、viewer.js:421（`portMark`）、viewer.js:432（`unitName`）、viewer.js:441（`portRows`）、viewer.js:460（`portListHtml`）。

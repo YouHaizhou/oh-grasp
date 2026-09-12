@@ -223,6 +223,17 @@ test('bilingual fixture exercises dedup: kinds < connection count', () => {
   assert.equal(counts.grp_io.in, 0, '入方向没有内容 → 渲染成「—」');
 });
 
+test('bilingual fixture writes mid-point labels as action phrases, per language', () => {
+  // ADR-0008：中点从「数据名」改成「动作」——`配置文件原文` 一类名词读不出这条线在干什么，
+  // 「传入配置文件原文」才是一句话。样例是这条语义在仓库里唯一的演示处。
+  const { edges } = topPorts(BI_IR);
+  assert.deepEqual(edges.map((e) => L.edgeLabel(e, 'zh')),
+    ['传入解析后的配置', '传入解析后的配置', '传入带来源的记录'],
+    '同一内容的两条边中点写法一致（同 label 复用同一句话）');
+  assert.deepEqual(edges.map((e) => L.edgeLabel(e, 'en')),
+    ['pass the parsed config', 'pass the parsed config', 'pass the source-tagged records']);
+});
+
 // ---- nodeSvg：盒体（含端口标注） ----
 const GRP_ID = 'grp_x';
 const GRP = {
@@ -363,6 +374,65 @@ test('port list collapses many peers with the same · / +N convention as edge la
   assert.ok(html.includes('P一 · P二 +2'), '对端多时收尾成 `a · b +2`');
 });
 
+// ---- 四段说明：取值 / 按来源模块分组的行数据 / 行 HTML ----
+const BI_M = {};
+BI_IR.modules.forEach((m) => (BI_M[m.id] = m));
+const biConn = (from, to) => BI_IR.connections.filter((c) => c.from === from && c.to === to)[0];
+
+test('pickPart reads one of the four fixed segments by language', () => {
+  const d = {
+    zh: { source: '从哪来', process: '经过什么', output: '输出什么', purpose: '用于什么' },
+    en: { source: 'where from', process: 'what happens', output: 'what comes out', purpose: 'what for' },
+  };
+  assert.equal(L.pickPart(d, 'zh', 'source'), '从哪来');
+  assert.equal(L.pickPart(d, 'en', 'purpose'), 'what for');
+  assert.equal(L.pickPart(d, 'fr', 'output'), '输出什么', '非法语言落回默认语言');
+  assert.equal(L.pickPart({ en: { source: 'only english' } }, 'zh', 'source'), 'only english', '缺当前语言时回退');
+  assert.equal(L.pickPart(d, 'zh', 'nope'), '', '四段之外没有第五段');
+  [undefined, null, '只是一句话', {}, { zh: {} }].forEach((bad) => {
+    assert.strictEqual(L.pickPart(bad, 'zh', 'source'), '', `pickPart(${JSON.stringify(bad)}) 应为空串`);
+  });
+});
+
+test('fourPartRows groups a folded edge by source module, keeping IR order', () => {
+  // 顶层折叠后，组内成员的 connection 在画布上没有可见的线——按来源模块分组是它们唯一的到达路径。
+  const two = { from: 'grp_io', to: 'out', conns: [biConn('parse_config', 'build_index'), biConn('process_records', 'build_index')] };
+  assert.deepEqual(L.fourPartRows(two).map((g) => g.id), ['parse_config', 'process_records'], '按来源模块分组，保 IR 首现顺序');
+  assert.equal(L.fourPartRows(two)[0].conns.length, 1);
+
+  const same = { from: 'grp_io', to: 'out', conns: [biConn('parse_config', 'process_records'), biConn('parse_config', 'build_index')] };
+  const g = L.fourPartRows(same);
+  assert.equal(g.length, 1, '同一个来源模块的多条 connection 归在一组');
+  assert.equal(g[0].conns.length, 2, '组内每条 connection 都在');
+  assert.deepEqual(L.fourPartRows({ conns: [] }), []);
+});
+
+test('fourPartHtml lists all four segments of every connection, grouped by source module', () => {
+  const edge = { from: 'grp_io', to: 'build_index', conns: [biConn('parse_config', 'build_index'), biConn('process_records', 'build_index')] };
+  const html = L.fourPartHtml(edge, 'zh', BI_M);
+  assert.equal((html.match(/class="vA-fp-src"/g) || []).length, 2, '分组数 = 来源模块数');
+  assert.ok(html.includes('>parseConfig<') && html.includes('>processRecords<'), '组标题是来源模块名（名字不译）');
+  assert.equal((html.match(/class="vA-fp-cap"/g) || []).length, 8, '2 条 connection × 4 段');
+  ['来源', '处理', '输出', '用途'].forEach((cap) => assert.ok(html.includes(cap), '缺段标题 ' + cap));
+  assert.ok(html.includes(biConn('parse_config', 'build_index').description.zh.source), '段内容是当前语言的原文');
+
+  const en = L.fourPartHtml(edge, 'en', BI_M);
+  assert.ok(en.includes(biConn('parse_config', 'build_index').description.en.source), '切语言后四段跟着换');
+  assert.ok(!en.includes(biConn('parse_config', 'build_index').description.zh.source), '英文版里不该混进中文段');
+  ['Source', 'Process', 'Output', 'Purpose'].forEach((cap) => assert.ok(en.includes(cap), 'en 缺段标题 ' + cap));
+});
+
+test('a connection without a description renders an explicit dash for each segment', () => {
+  // 真实产物此刻 47 条 connection 一条 description 都没有（重新生成是契约步交付后的事）：
+  // 点开必须不抛错，且缺的段落显式画「—」——静默留白会让人以为那条线没有用途。
+  const edge = { from: 'x', to: 'y', conns: [{ from: 'x', to: 'y', label: '裸连接' }] };
+  const html = L.fourPartHtml(edge, 'zh', { x: { label: 'X' }, y: { label: 'Y' } });
+  assert.equal((html.match(/>—</g) || []).length, 4, '四段各自显式画「—」');
+  assert.equal((html.match(/class="vA-fp-cap"/g) || []).length, 4, '连没有 description 也保持四段的结构');
+  assert.ok(html.includes('裸连接'), 'label 仍然照常显示');
+  assert.deepEqual(L.fourPartHtml({ conns: [] }, 'zh', {}).length > 0, true, '空边也要给个说法，不能返回空串');
+});
+
 // ---- fwdPath / feedbackPath：入边端点外移 ~8px（ADR-0009） ----
 test('forward edge lands ~8px above the target box top edge', () => {
   const a = { x: 0, y: 0 }, b = { x: 0, y: 300 };
@@ -370,6 +440,70 @@ test('forward edge lands ~8px above the target box top edge', () => {
   const p = L.fwdPath(a, b, sA, sB);
   assert.ok(p.d.startsWith('M118 78 '), '出边起点仍在源盒底边（只动入端）');
   assert.equal(Number(p.d.slice(p.d.lastIndexOf(' ') + 1)), b.y - 8, '入端 = 目标盒上边缘 - 8px');
+});
+
+// ---- 边的可点单元：命中路径 + 中点标签 + <title>，同一个带边身份的组（ADR-0010） ----
+// 一条边在浏览器里就是一个 <g class="edge">：细线点不中，所以组里另有一条透明的加宽路径
+// 兜住命中区；中点标签的白色底衬也在组里。点哪个子元素都冒泡到同一个组 = 同一条边。
+const pathsOf = (svg) => [...svg.matchAll(/<path ([^>]*)\/>/g)].map((m) => m[1]);
+const attr = (s, k) => (new RegExp('\\b' + k + '="([^"]*)"').exec(s) || [])[1];
+
+test('a forward edge is one clickable unit: edge identity, hit path, mid label, hover title', () => {
+  const a = { x: 0, y: 0 }, b = { x: 0, y: 300 };
+  const p = L.fwdPath(a, b, { w: 236, h: 78 }, { w: 236, h: 78 });
+  const svg = L.fwdEdgeSvg({ from: 'grp_io', to: 'build_index' }, p, '传入解析后的配置', 'mk1');
+
+  assert.ok(svg.startsWith('<g class="edge"') && svg.endsWith('</g>'), '整条边收进一个可点单元');
+  assert.equal(attr(svg, 'data-from'), 'grp_io', '单元带边身份（from）');
+  assert.equal(attr(svg, 'data-to'), 'build_index', '单元带边身份（to）');
+
+  const paths = pathsOf(svg);
+  assert.equal(paths.length, 2, '一条可见路径 + 一条命中路径');
+  assert.deepEqual(paths.map((a2) => attr(a2, 'd')), [p.d, p.d], '命中路径与可见路径是同一条 d');
+  assert.equal(attr(paths[0], 'stroke-width'), '1.5', '可见路径的粗细不变（读者看到的还是细线）');
+  assert.equal(attr(paths[0], 'stroke'), '#b6c2d1');
+  assert.ok(Number(attr(paths[1], 'stroke-width')) >= 10, '命中路径描边加宽到可点范围');
+  assert.equal(attr(paths[1], 'stroke'), 'transparent', '命中路径不改变画面，只兜命中');
+  assert.ok(/pointer-events="stroke"/.test(paths[1]), '透明路径靠 pointer-events 吃点击');
+
+  assert.ok(svg.includes('<title>传入解析后的配置</title>'), 'hover 用原生 title，内容是当前语言的中点短语');
+  assert.ok(svg.includes('>传入解析后的配置</text>'), '中点标签就在同一个单元里');
+  assert.ok(/<rect class="edge-hit-label"[^>]*fill="#ffffff"/.test(svg), '中点标签有白色底衬');
+});
+
+test('a feedback edge is a clickable unit too, and its title carries the ↺ marker', () => {
+  const a = { x: 0, y: 300 }, b = { x: 0, y: 0 };
+  const pa = L.feedbackPath(a, b, { w: 236, h: 78 }, { w: 236, h: 78 }, 500);
+  const svg = L.backEdgeSvg({ from: 'b', to: 'a' }, pa.d, '传入校验回执', 490, pa.mid, 170, 'mk2');
+  assert.equal(attr(svg, 'data-from'), 'b');
+  assert.equal(attr(svg, 'data-to'), 'a');
+  assert.equal(pathsOf(svg).length, 2, '反馈弧也有命中路径');
+  assert.ok(svg.includes('<title>↺ 传入校验回执</title>'));
+  assert.ok(svg.includes('>↺ 传入校验回执</text>'));
+});
+
+test('the drawn mid label is truncated but the hover title keeps the whole phrase', () => {
+  // 截断正是 hover 的用处（与节点盒里显示全名同一条理由，ADR-0010）。
+  const a = { x: 0, y: 0 }, b = { x: 0, y: 300 };
+  const p = L.fwdPath(a, b, { w: 236, h: 78 }, { w: 236, h: 78 });
+  const long = '把解析后的配置对象原样传给下游用来按 id 建立查找索引并保留来源标记';
+  const svg = L.fwdEdgeSvg({ from: 'a', to: 'b' }, p, long, 'mk1');
+  const drawn = /<text[^>]*>([^<]*)<\/text>/.exec(svg)[1];
+  assert.ok(drawn.length < long.length && drawn.endsWith('…'), '画出来的是截断后的一段');
+  assert.ok(svg.includes('<title>' + long + '</title>'), 'hover 给完整的那句话');
+  const back = /<rect class="edge-hit-label"[^>]*width="([\d.]+)"/.exec(svg);
+  assert.ok(Number(back[1]) <= 246, '白底衬按画出来的那段定宽，不按整句（否则会盖住整条边）');
+});
+
+test('a node box carries its full name as the native hover title', () => {
+  const M = { m1: { id: 'm1', label: 'extractQualityArgs', description: '取质量参数' } };
+  const zh = L.nodeSvg('m1', 0, 0, null, 'zh', M, {});
+  assert.ok(zh.includes('<title>extractQualityArgs</title>'), '节点 hover 显全名（名字不译）');
+});
+
+test('a group hover title follows the display language', () => {
+  assert.ok(L.nodeSvg(GRP_ID, 0, 0, null, 'zh', GM, GG).includes('<title>参数解析</title>'));
+  assert.ok(L.nodeSvg(GRP_ID, 0, 0, null, 'en', GM, GG).includes('<title>arg parsing</title>'));
 });
 
 test('feedback arc inbound endpoint is lifted by the same gap', () => {

@@ -19,6 +19,39 @@ function validate(ir, source) {
   const isTranslatableArray = (x) => Array.isArray(x) && x.every((s) => isTranslatableItem(s));
   const PROSE_HINT = 'must be a non-empty string or a {zh, en} object';
 
+  // 四段说明（connection.description）：**语言在外、四个固定字段名在内**
+  // { zh: { source, process, output, purpose }, en: { … } }（ADR-0008）。
+  // 与 translatable 刻意不同形：它的叶子是四个**固定名字**（与用户原话一一对应，不许改名），
+  // 不是一段自由散文；单语产物里那种普通字符串在这里是错的形状。
+  // expand 步的宽严：整段 description 可以**缺席**（「每条 connection 都要有四段」是契约步的硬要求），
+  // 但一旦出现，出现的那个语言子树就必须四段齐全、非空——半截的 description 比缺席更危险：
+  // 它会让「用于什么」那一格在画布上静默留白，读者以为那条线没有用途。
+  const FOUR_KEYS = ['source', 'process', 'output', 'purpose'];
+  const LANGS = ['zh', 'en'];
+  function checkFourPart(desc, p, push) {
+    if (!isObj(desc)) {
+      push({ path: p, message: 'description must be an object {zh: {source, process, output, purpose}, en: {…}}' });
+      return;
+    }
+    let langsSeen = 0;
+    for (const lang of LANGS) {
+      if (desc[lang] === undefined) continue;
+      langsSeen += 1;
+      if (!isObj(desc[lang])) {
+        push({ path: `${p}.${lang}`, message: `${lang} must be an object with the four fixed fields (${FOUR_KEYS.join(', ')})` });
+        continue;
+      }
+      for (const k of FOUR_KEYS) {
+        if (!isNonEmptyStr(desc[lang][k])) {
+          push({ path: `${p}.${lang}.${k}`, message: `${k} must be a non-empty string` });
+        }
+      }
+    }
+    if (langsSeen === 0) {
+      push({ path: p, message: 'description needs at least one of zh / en' });
+    }
+  }
+
   if (!isObj(ir)) {
     return { ok: false, errors: [{ path: '$', message: 'IR must be a JSON object' }] };
   }
@@ -158,6 +191,10 @@ function validate(ir, source) {
       }
       if (!isTranslatable(c.label)) {
         errors.push({ path: `${p}.label`, message: `label ${PROSE_HINT}` });
+      }
+      // 四段说明：可选字段，存在才校验形态（见 checkFourPart 注释里的宽严取舍）。
+      if (c.description !== undefined && c.description !== null) {
+        checkFourPart(c.description, `${p}.description`, (e) => errors.push(e));
       }
       for (const f of ['from', 'to']) {
         const ref = c[f];

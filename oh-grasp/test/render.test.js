@@ -118,8 +118,8 @@ test('both languages of the prose are embedded in the artifact', () => {
   assert.ok(html.includes('Reads and parses a JSON config'), '英文副标题在产物里');
   assert.ok(html.includes('读取与解析'), '中文分组名在产物里');
   assert.ok(html.includes('Reading and parsing'), '英文分组名在产物里');
-  assert.ok(html.includes('配置文件原文'), '中文连线 label 在产物里');
-  assert.ok(html.includes('raw config text'), '英文连线 label 在产物里');
+  assert.ok(html.includes('传入配置文件原文'), '中文连线 label（动宾短语）在产物里');
+  assert.ok(html.includes('pass the raw config text'), '英文连线 label 在产物里');
   // 名字不译：两种语言下都只有原样的源码标识符 / 包名
   assert.ok(html.includes('readConfig') && html.includes('"fs"'), '模块名与包名原样保留');
 });

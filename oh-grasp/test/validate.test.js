@@ -322,6 +322,22 @@ test('bilingual IR passes validation', () => {
   assert.deepEqual(r.errors, []);
 });
 
+test('every connection of the bilingual fixture carries the four segments in both languages', () => {
+  // 样例是新形态的**演示样板**：中点那句话（label）与点开的四段都得在它身上看得到，
+  // 否则「点边读四句」这条能力在仓库里没有任何可见的凭据。
+  assert.ok(BI_IR.connections.length >= 4, '样例要有多条 connection 可演示');
+  BI_IR.connections.forEach((c, i) => {
+    assert.ok(c.description, `connections[${i}] 缺 description`);
+    for (const lang of ['zh', 'en']) {
+      for (const k of ['source', 'process', 'output', 'purpose']) {
+        const v = c.description[lang] && c.description[lang][k];
+        assert.ok(typeof v === 'string' && v.trim() !== '',
+          `connections[${i}].description.${lang}.${k} 不能为空`);
+      }
+    }
+  });
+});
+
 test('monolingual IR keeps passing next to the bilingual one', () => {
   // 旧产物（散文字段全是普通字符串）不受影响 —— expand 步的兼容保证。
   const r = validate(validIR());
@@ -397,4 +413,82 @@ test('internal module source is still copied verbatim, not a {zh,en} pair', () =
   ir.modules[1].source = { zh: 'function parseConfig(raw) {}', en: 'function parseConfig(raw) {}' };
   const r = validate(ir, SOURCE);
   assert.ok(r.errors.some((e) => e.path === 'modules[1].source'));
+});
+
+// === 四段说明（connection.description）：语言在外、四个固定字段在内（ADR-0008） ===
+function four(lang, suffix) {
+  return {
+    source: lang + '-source' + (suffix || ''),
+    process: lang + '-process' + (suffix || ''),
+    output: lang + '-output' + (suffix || ''),
+    purpose: lang + '-purpose' + (suffix || ''),
+  };
+}
+
+test('connection description with all four segments in both languages passes', () => {
+  const ir = validIR();
+  ir.connections[0].description = { zh: four('zh'), en: four('en') };
+  const r = validate(ir);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.errors, []);
+});
+
+test('a connection without description still passes (expand step, not the contract step)', () => {
+  // 硬要求（每条 connection 都必须有四段）是契约步的 AC；本步只收「存在时必须完整」。
+  const ir = validIR();
+  assert.ok(!('description' in ir.connections[0]));
+  const r = validate(ir);
+  assert.equal(r.ok, true);
+});
+
+test('connection description missing one segment fails with the exact path', () => {
+  const ir = validIR();
+  const zh = four('zh');
+  delete zh.process;
+  ir.connections[0].description = { zh, en: four('en') };
+  const r = validate(ir);
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => e.path === 'connections[0].description.zh.process'),
+    '错误 path 要指到缺的那一段：' + JSON.stringify(r.errors));
+});
+
+test('connection description with an empty segment fails', () => {
+  const ir = validIR();
+  const en = four('en');
+  en.purpose = '   ';
+  ir.connections[0].description = { zh: four('zh'), en };
+  const r = validate(ir);
+  assert.ok(r.errors.some((e) => e.path === 'connections[0].description.en.purpose'),
+    '空白不算内容：' + JSON.stringify(r.errors));
+});
+
+test('connection description must be an object, not a plain string', () => {
+  // 四段的形态与 translatable（单语产物里那种普通字符串）刻意不同，不能混用。
+  const ir = validIR();
+  ir.connections[0].description = '这条线从哪来、经过什么、输出什么、用于什么';
+  const r = validate(ir);
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => e.path === 'connections[0].description'));
+});
+
+test('an empty connection description fails', () => {
+  const ir = validIR();
+  ir.connections[0].description = {};
+  const r = validate(ir);
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => e.path === 'connections[0].description'));
+});
+
+test('a description language subtree that is not an object fails at the language', () => {
+  const ir = validIR();
+  ir.connections[0].description = { zh: '整段写成一串', en: four('en') };
+  const r = validate(ir);
+  assert.ok(r.errors.some((e) => e.path === 'connections[0].description.zh'));
+});
+
+test('one complete language subtree is tolerated (bilingual-required is the contract step)', () => {
+  const ir = validIR();
+  ir.connections[0].description = { zh: four('zh') };
+  const r = validate(ir);
+  assert.equal(r.ok, true);
 });

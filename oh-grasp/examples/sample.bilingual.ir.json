@@ -81,22 +81,78 @@
     {
       "from": "read_config",
       "to": "parse_config",
-      "label": { "zh": "配置文件原文", "en": "raw config text" }
+      "label": { "zh": "传入配置文件原文", "en": "pass the raw config text" },
+      "description": {
+        "zh": {
+          "source": "config 路径指向的那个文件，刚被整份读进内存。",
+          "process": "readConfig 用 fs.readFileSync 按 UTF-8 同步读，不做校验也不做转换。",
+          "output": "一份与磁盘逐字相同的配置文本。",
+          "purpose": "交给 parseConfig 解析成内部使用的配置对象。"
+        },
+        "en": {
+          "source": "The file the config path points at, freshly read into memory.",
+          "process": "readConfig reads it synchronously as UTF-8 with fs.readFileSync: no validation, no conversion.",
+          "output": "The config text, character for character as it sits on disk.",
+          "purpose": "Handed to parseConfig to become the config object used internally."
+        }
+      }
     },
     {
       "from": "parse_config",
       "to": "process_records",
-      "label": { "zh": "解析后的配置对象", "en": "the parsed config object" }
+      "label": { "zh": "传入解析后的配置", "en": "pass the parsed config" },
+      "description": {
+        "zh": {
+          "source": "parseConfig 用 JSON.parse 解析出的配置对象。",
+          "process": "原样传出，不做任何加工或补全。",
+          "output": "一个完整的配置对象，字段与 JSON 里写的一致。",
+          "purpose": "让 processRecords 按 config.source 为每条记录打上来源标记。"
+        },
+        "en": {
+          "source": "The config object parseConfig produced with JSON.parse.",
+          "process": "Passed straight through, with nothing added or filled in.",
+          "output": "A complete config object whose fields match the JSON.",
+          "purpose": "So processRecords can tag every record with config.source."
+        }
+      }
     },
     {
       "from": "parse_config",
       "to": "build_index",
-      "label": { "zh": "解析后的配置对象", "en": "the parsed config object" }
+      "label": { "zh": "传入解析后的配置", "en": "pass the parsed config" },
+      "description": {
+        "zh": {
+          "source": "parseConfig 用 JSON.parse 解析出的配置对象。",
+          "process": "原样传出，不做任何加工或补全。",
+          "output": "一个完整的配置对象，字段与 JSON 里写的一致。",
+          "purpose": "让 buildIndex 按 id 建立查找索引。"
+        },
+        "en": {
+          "source": "The config object parseConfig produced with JSON.parse.",
+          "process": "Passed straight through, with nothing added or filled in.",
+          "output": "A complete config object whose fields match the JSON.",
+          "purpose": "So buildIndex can key the records by id."
+        }
+      }
     },
     {
       "from": "process_records",
       "to": "build_index",
-      "label": { "zh": "带来源标记的记录", "en": "records tagged with their source" }
+      "label": { "zh": "传入带来源的记录", "en": "pass the source-tagged records" },
+      "description": {
+        "zh": {
+          "source": "processRecords 展开后的记录数组，每条都带了 config.source。",
+          "process": "按原顺序整批传出，不再过滤或排序。",
+          "output": "一串带来源标记的记录。",
+          "purpose": "让 buildIndex 以每条记录的 id 为键建索引，供按 id 取用。"
+        },
+        "en": {
+          "source": "The record array processRecords spread out, each with config.source attached.",
+          "process": "Handed over as a whole batch, in its original order, unfiltered and unsorted.",
+          "output": "Records that each carry their source tag.",
+          "purpose": "So buildIndex can key them by id for later lookup."
+        }
+      }
     }
   ]
 }
