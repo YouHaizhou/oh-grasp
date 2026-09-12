@@ -155,14 +155,230 @@ test('edgeLabel aggregates per language (labels are prose and go through pick)',
   assert.equal(L.edgeLabel({ conns: many }, 'en'), 'A · B +2');
 });
 
-// ---- countPorts：端口的 ×N 计数 ----
-test('countPorts tallies per-direction connection counts', () => {
+// ---- countPorts：端口的 ×N = 该方向「不同内容种数」（ADR-0009，不是连接条数） ----
+test('countPorts counts distinct content kinds per direction, not connections', () => {
   const c = L.countPorts([
-    { from: 'a', to: 'b', conns: [{}, {}, {}] },
-    { from: 'b', to: 'a', conns: [{}] },
+    { from: 'a', to: 'b', conns: [
+      { label: { zh: '配置', en: 'config' } },
+      { label: { zh: '配置', en: 'config' } }, // 同一个内容：只算一种
+      { label: { zh: '路径', en: 'path' } },
+    ] },
+    { from: 'b', to: 'a', conns: [{ label: { zh: '结果', en: 'result' } }] },
   ]);
-  assert.deepEqual(c.a, { in: 1, out: 3 });
-  assert.deepEqual(c.b, { in: 3, out: 1 });
+  assert.equal(c.a.out, 2, '3 条连接里只有 2 种内容');
+  assert.equal(c.a.in, 1);
+  assert.deepEqual(c.b, {
+    in: 2, out: 1,
+    inRep: { zh: '配置', en: 'config' },   // 代表内容取该方向 IR 顺序第一条
+    outRep: { zh: '结果', en: 'result' },
+  });
+});
+
+test('countPorts works on monolingual artifacts (plain-string labels)', () => {
+  const c = L.countPorts([
+    { from: 'a', to: 'b', conns: [
+      { label: 'renderer script path' },
+      { label: 'renderer script path' },
+      { label: 'repo root' },
+    ] },
+  ]);
+  assert.equal(c.a.out, 2, '重复的同一句只算一种（旧形态字符串按 zh 取值就是它本身）');
+  assert.equal(c.a.outRep, 'renderer script path');
+});
+
+test('countPorts survives ids that collide with Object.prototype keys', () => {
+  const c = L.countPorts([
+    { from: 'constructor', to: '__proto__', conns: [{ label: { zh: '内容' } }] },
+  ]);
+  assert.equal(c.constructor.out, 1, 'id 叫 constructor 也只是个普通键');
+  assert.equal(c['__proto__'].in, 1, 'id 叫 __proto__ 也要能计数');
+  assert.equal(Object.prototype.in, undefined, '不能污染 Object.prototype');
+});
+
+// ---- fixture：带 group 的双语样例（端口行为全是 group 才有的） ----
+const BI_IR = require('../examples/sample.bilingual.ir.json');
+
+// 折叠视图的顶层端口，与 viewer.js DOM 装配同一条链：topOf → aggregateEdges → countPorts。
+// 返回 counts（新口径）与 tail（旧口径 = 连接条数），好让两者在同一个 fixture 上对照。
+function topPorts(ir) {
+  const M = {};
+  ir.modules.forEach((m) => (M[m.id] = m));
+  const topOf = (m) => m.group || m.id;
+  const conns = ir.connections.filter((c) => {
+    const fm = M[c.from], tm = M[c.to];
+    return fm && tm && fm.type === 'internal' && tm.type === 'internal' && topOf(fm) !== topOf(tm);
+  });
+  const edges = L.aggregateEdges(conns, (c) => ({ from: topOf(M[c.from]), to: topOf(M[c.to]) }));
+  const tail = {};
+  edges.forEach((e) => (tail[e.from] = (tail[e.from] || 0) + e.conns.length));
+  return { counts: L.countPorts(edges), edges, tail };
+}
+
+test('bilingual fixture exercises dedup: kinds < connection count', () => {
+  const { counts, tail } = topPorts(BI_IR);
+  assert.ok(counts.grp_io, 'fixture 里有带端口的 group');
+  assert.ok(tail.grp_io > counts.grp_io.out,
+    '出方向：连接条数 ' + tail.grp_io + ' > 内容种数 ' + counts.grp_io.out
+    + '（多条连接共享同一 zh 文本，去重真的降了 N）');
+  assert.equal(counts.grp_io.in, 0, '入方向没有内容 → 渲染成「—」');
+});
+
+// ---- nodeSvg：盒体（含端口标注） ----
+const GRP_ID = 'grp_x';
+const GRP = {
+  id: GRP_ID,
+  label: { zh: '参数解析', en: 'arg parsing' },
+  description: { zh: '把命令行参数解析成配置', en: 'parses argv into config' },
+};
+const GM = {};                    // group 盒不读 M，给空表即可
+const GG = { [GRP_ID]: GRP };
+
+// 取出端口标注那段 <text>（font-size="10"，入端口在前、出端口在后）。
+function portTexts(svg) {
+  return [...svg.matchAll(/<text x="([\d.]+)" y="([\d.]+)" font-size="10"[^>]*>([^<]*)<\/text>/g)]
+    .map((m) => ({ x: Number(m[1]), y: Number(m[2]), t: m[3] }));
+}
+
+test('group port prints ×N plus the IR-first representative content', () => {
+  const counts = L.countPorts([
+    { from: GRP_ID, to: 'leaf', conns: [{ label: { zh: '解析后的配置对象', en: 'the parsed config object' } }] },
+    { from: 'other', to: GRP_ID, conns: [
+      { label: { zh: '命令行原文', en: 'raw argv' } },
+      { label: { zh: '环境变量', en: 'env vars' } },
+    ] },
+  ]);
+  const pts = portTexts(L.nodeSvg(GRP_ID, 0, 0, counts, 'zh', GM, GG));
+  assert.deepEqual(pts.map((p) => p.t), ['×2 命令行原文', '×1 解析后的配置对象']);
+  assert.ok(pts[0].x > 282 / 2, '代表内容画在端口圆点右侧（盒宽中点之右）');
+  assert.ok(pts[0].x + 130 <= 282, '整段按可用宽截断，不出盒（GW = 282）');
+});
+
+test('×N is language-invariant while the representative follows the language', () => {
+  const counts = L.countPorts([
+    { from: 'other', to: GRP_ID, conns: [
+      { label: { zh: '同一个内容', en: 'first wording' } },
+      { label: { zh: '同一个内容', en: 'second wording' } }, // zh 相同 = 同一种内容，尽管 en 措辞不同
+      { label: { zh: '另一个内容', en: 'another thing' } },
+    ] },
+  ]);
+  const zh = portTexts(L.nodeSvg(GRP_ID, 0, 0, counts, 'zh', GM, GG));
+  const en = portTexts(L.nodeSvg(GRP_ID, 0, 0, counts, 'en', GM, GG));
+  assert.equal(zh[0].t, '×2 同一个内容');
+  assert.equal(en[0].t, '×2 first wording', '代表内容跟着显示语言走');
+  assert.equal(zh[0].t.match(/×\d+/)[0], en[0].t.match(/×\d+/)[0], '切语言后 N 不变');
+});
+
+test('an empty direction renders an explicit dash port instead of no port', () => {
+  const svg = L.nodeSvg(GRP_ID, 0, 0, L.countPorts([]), 'zh', GM, GG);
+  assert.equal((svg.match(/class="port"/g) || []).length, 2, '两个方向的端口圆点都画出来');
+  assert.deepEqual(portTexts(svg).map((p) => p.t), ['—', '—'], '没有数据的方向显式标「—」');
+});
+
+test('a long representative is truncated by fitWidth, digits survive', () => {
+  const long = '这是一个非常长的代表内容描述文本用来验证单行超宽时会被截断';
+  const counts = L.countPorts([
+    { from: 'other', to: GRP_ID, conns: [{ label: { zh: long, en: 'long' } }] },
+  ]);
+  const p = portTexts(L.nodeSvg(GRP_ID, 0, 0, counts, 'zh', GM, GG))[0];
+  assert.ok(p.t.startsWith('×1 '), '数字在段首，不会被截掉');
+  assert.ok(p.t.endsWith('…'), '超宽时截断加省略号');
+  assert.ok(p.t.length < long.length, '确实截短了');
+});
+
+// ---- portRows / portListHtml：点开的清单行数 === 盒上的 ×N ----
+// 断言的是**行数**（以及行内的数据），不是某段 HTML 文本。
+const rowCount = (html) => (html.match(/class="vA-pp-row"/g) || []).length;
+
+test('port list rows equal ×N on the bilingual fixture (kinds < connections)', () => {
+  const { counts, edges, tail } = topPorts(BI_IR);
+  assert.ok(tail.grp_io > counts.grp_io.out, '前提：该端口连接条数 > 内容种数（去重真的降了 N）');
+  const rows = L.portRows('grp_io', 'out', edges);
+  assert.equal(rows.length, counts.grp_io.out,
+    '行数 === ×N（' + counts.grp_io.out + '），不是连接条数（' + tail.grp_io + '）');
+  assert.equal(rows[0].peers.length, 2, '两条聚合边指向两个不同对端，行内对端去重后仍列全');
+  assert.deepEqual(rows[0].peers, ['process_records', 'build_index'], '对端按 IR 首现顺序');
+});
+
+test('port list rows equal ×N on a real-artifact-shaped port (8 connections, 4 kinds)', () => {
+  // grp_arg_parse 出端口的真实形状：12 条连接 / 3 个对端 / 4 种内容。
+  const c = (zh, en) => ({ label: { zh, en } });
+  const edges = [
+    { from: 'grp_x', to: 'g1', conns: [c('quality profile', 'q'), c('quality profile', 'q'), c('quality profile', 'q')] },
+    { from: 'grp_x', to: 'g2', conns: [c('quality profile', 'q'), c('repo root', 'r')] },
+    { from: 'grp_x', to: 'g3', conns: [c('repo root', 'r'), c('compare options', 'c'), c('migration options', 'm')] },
+  ];
+  const counts = L.countPorts(edges);
+  const rows = L.portRows('grp_x', 'out', edges);
+  assert.equal(rows.length, counts.grp_x.out, '行数 === ×N（4）');
+  assert.equal(rows.length, 4, '去掉重复内容的连接后是 4 行');
+  assert.notEqual(rows.length, 8, '不是 8 行（连接条数会多算）');
+  assert.deepEqual(rows[0].peers, ['g1', 'g2'], '同一内容的多条连接并进同一行，对端去重');
+  assert.deepEqual(rows[1].peers, ['g2', 'g3']);
+  assert.equal(L.pick(rows[0].rep, 'zh'), 'quality profile', '行内内容取该种内容 IR 顺序第一条');
+});
+
+test('port list rows equal ×N on a monolingual graph (plain-string labels)', () => {
+  // 单语真实产物：label 是普通字符串，pick(x, 'zh') 就是它本身 → 去重键仍然成立。
+  const edges = [
+    { from: 'grp_x', to: 'g1', conns: [{ label: '读取配置' }, { label: '读取配置' }] },
+    { from: 'grp_x', to: 'g2', conns: [{ label: '渲染模板' }, { label: '读取配置' }] },
+  ];
+  const counts = L.countPorts(edges);
+  assert.equal(counts.grp_x.out, 2);
+  assert.equal(L.portRows('grp_x', 'out', edges).length, counts.grp_x.out);
+});
+
+test('every port of the bilingual fixture has as many list rows as ×N, in both languages', () => {
+  const { counts, edges } = topPorts(BI_IR);
+  const M = {}; BI_IR.modules.forEach((m) => (M[m.id] = m));
+  const G = {}; (BI_IR.groups || []).forEach((g) => (G[g.id] = g));
+  const ids = Object.keys(counts);
+  assert.ok(ids.length, 'fixture 有端口可数');
+  ids.forEach((id) => {
+    ['in', 'out'].forEach((dir) => {
+      const n = counts[id][dir];
+      const rows = L.portRows(id, dir, edges);
+      assert.equal(rows.length, n, id + '/' + dir + '：行数应等于 ×N');
+      // 渲染层同一份数据在两种语言下行数一致（去重键是 zh，不是显示语言）。
+      const zh = rowCount(L.portListHtml(id, dir, edges, 'zh', M, G));
+      const en = rowCount(L.portListHtml(id, dir, edges, 'en', M, G));
+      assert.equal(zh, n, id + '/' + dir + '（zh）');
+      assert.equal(en, n, id + '/' + dir + '（en）切语言行数不变');
+    });
+  });
+});
+
+test('port list collapses many peers with the same · / +N convention as edge labels', () => {
+  assert.equal(L.uniqJoin(['甲', '乙', '丙']), '甲 · 乙 · 丙');
+  assert.equal(L.uniqJoin(['甲', '乙', '丙', '丁']), '甲 · 乙 +2', '与边中点标签同一套收尾规则');
+  assert.equal(L.uniqJoin(['甲', '甲', '乙']), '甲 · 乙', '重复项只出现一次');
+  assert.equal(L.uniqJoin([]), '');
+  const peers = ['p1', 'p2', 'p3', 'p4'];
+  const edges = peers.map((p) => ({ from: 'grp_x', to: p, conns: [{ label: { zh: '同一种内容', en: 'one kind' } }] }));
+  const rows = L.portRows('grp_x', 'out', edges);
+  assert.equal(rows.length, 1, '4 个对端 / 同一内容 → 1 行');
+  assert.deepEqual(rows[0].peers, peers, '对端全列出（去重，保序）');
+  const html = L.portListHtml('grp_x', 'out', edges, 'zh', { p1: { label: 'P一' }, p2: { label: 'P二' }, p3: { label: 'P三' }, p4: { label: 'P四' } }, { grp_x: GRP });
+  assert.equal(rowCount(html), 1);
+  assert.ok(html.includes('P一 · P二 +2'), '对端多时收尾成 `a · b +2`');
+});
+
+// ---- fwdPath / feedbackPath：入边端点外移 ~8px（ADR-0009） ----
+test('forward edge lands ~8px above the target box top edge', () => {
+  const a = { x: 0, y: 0 }, b = { x: 0, y: 300 };
+  const sA = { w: 236, h: 78 }, sB = { w: 236, h: 78 };
+  const p = L.fwdPath(a, b, sA, sB);
+  assert.ok(p.d.startsWith('M118 78 '), '出边起点仍在源盒底边（只动入端）');
+  assert.equal(Number(p.d.slice(p.d.lastIndexOf(' ') + 1)), b.y - 8, '入端 = 目标盒上边缘 - 8px');
+});
+
+test('feedback arc inbound endpoint is lifted by the same gap', () => {
+  const a = { x: 0, y: 300 }, b = { x: 0, y: 0 };
+  const sA = { w: 236, h: 78 }, sB = { w: 236, h: 78 };
+  const p = L.feedbackPath(a, b, sA, sB, 500);
+  const m = p.d.match(/([-\d.]+) ([-\d.]+)$/); // 弧的最后一个 C 段终点
+  assert.equal(Number(m[2]), b.y - 8, '反馈弧入端同样外移 8px');
+  assert.equal(Number(m[1]), 118, '入端 x 仍是目标盒宽中点');
 });
 
 // ---- aggregateEdges：同向去重 / 折叠 ----

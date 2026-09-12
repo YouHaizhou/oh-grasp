@@ -120,31 +120,63 @@
   var HGAP = 44, VGAP = 62;                  // 行内横距 / 行间纵距
   var PAD_LR = 44, PAD_TOP = 18, REGION_GAP = 40;
   var GRID_CAP = 940;                        // 无连接「独立带」每行封顶宽
+  var PORT_GAP = 8;                          // 入边终点离目标盒上边缘的间距（ADR-0009：外移 ~8px）
+  var REP_W = 130;                           // 端口代表内容的可用宽（盒内、fitWidth 截断）
 
-  /* ---------- 端口计数（折叠 group 的 ×N） ---------- */
+  /* ---------- 端口计数（折叠 group 的 ×N） ----------
+     ×N 数的是该方向上**不同内容的种数**，不是连接条数（ADR-0009）——12 条连接里可能
+     只有 4 种内容，标 12 会让「点开数得清」落空。去重键是 label 的 **zh 文本**：
+     按 zh 而不是按当前显示语言，切换语言时 N 才不变（同一个内容在两处写出的 label
+     字符串可能不同，zh 是判定「是不是一回事」的锚点）。
+     返回 { id: { in, out, inRep, outRep } }：in/out 是两个方向的内容种数，
+     inRep/outRep 是各方向 IR 顺序第一条 connection 的 label 字段（原样存，渲染时按
+     语言 pick）——代表内容由 nodeSvg 画在 ×N 右侧。
+     没有 label 的 connection 贡献不了「内容」，跳过（schema 里 label 必填，正常产物没有）。 */
+  // 一个端口的零值：某方向没有内容时用它（N=0 → 「—」）。挪成一处，免得两处字面量各自漂移。
+  function emptyPort() { return { in: 0, out: 0, inRep: null, outRep: null }; }
+
   function countPorts(edges) {
-    var c = {};
-    edges.forEach(function (e) {
-      (e.conns || []).forEach(function () {
-        c[e.from] = c[e.from] || { in: 0, out: 0 };
-        c[e.to] = c[e.to] || { in: 0, out: 0 };
-        c[e.from].out++;
-        c[e.to].in++;
+    // c 与 seen 都按**单元 id / label 文本**当键，两者都不受模式约束（schema 只要求 id 非空且唯一），
+    // 而 "constructor" / "__proto__" 这类键会让普通 {} 直接命中内置属性——`c['constructor'].out`
+    // 是 NaN，写 `__proto__` 更会污染 Object.prototype。所以两张表都用无原型对象。
+    var c = Object.create(null), seen = Object.create(null);
+    function tally(id, dir, cn) {
+      var txt = pick(cn ? cn.label : '', 'zh');
+      if (!txt || !id) return;
+      var sz = seen[id] || (seen[id] = { in: Object.create(null), out: Object.create(null) });
+      if (sz[dir][txt]) return;
+      sz[dir][txt] = true;
+      if (!c[id]) c[id] = emptyPort();
+      c[id][dir]++;
+      // 该方向第一条（遍历顺序 = IR 顺序，aggregateEdges 保序）当代表，之后不再覆盖。
+      var rk = dir === 'in' ? 'inRep' : 'outRep';
+      if (c[id][rk] === null) c[id][rk] = cn.label;
+    }
+    (edges || []).forEach(function (e) {
+      (e.conns || []).forEach(function (cn) {
+        tally(e.from, 'out', cn);
+        tally(e.to, 'in', cn);
       });
     });
     return c;
   }
 
+  /* ---------- 去重 + 首现顺序 + `a · b +2` 收尾 ----------
+     同一套表示同时给边中点标签（edgeLabel）与端口清单的对端（portListHtml）用：
+     读者学一次规则能用两处（ADR-0011）。 */
+  function uniqJoin(items) {
+    var out = [];
+    (items || []).forEach(function (t) {
+      if (t && out.indexOf(t) === -1) out.push(t);
+    });
+    if (!out.length) return '';
+    if (out.length <= 3) return out.join(' · ');
+    return out.slice(0, 2).join(' · ') + ' +' + (out.length - 2);
+  }
+
   /* ---------- 边 label 聚合（label 是可译散文，按语言取值后去重） ---------- */
   function edgeLabel(e, lang) {
-    var seen = [];
-    (e.conns || []).forEach(function (cn) {
-      var l = cn ? pick(cn.label, lang) : '';
-      if (l && seen.indexOf(l) === -1) seen.push(l);
-    });
-    if (!seen.length) return '';
-    if (seen.length <= 3) return seen.join(' · ');
-    return seen.slice(0, 2).join(' · ') + ' +' + (seen.length - 2);
+    return uniqJoin((e && e.conns || []).map(function (cn) { return cn ? pick(cn.label, lang) : ''; }));
   }
 
   /* ---------- 边聚合：同向多 connection 并成一条 {from,to,conns} ----------
@@ -333,29 +365,14 @@
   }
 
   /* ===================================================================
-     以下为浏览器端 DOM 应用（需 #oh-grasp-ir 内嵌 JSON + #root 等骨架）。
-     Node 环境（单测 / 语法检查）没有 document，整段跳过。
+     纯字符串渲染内核：节点盒与边路径。不碰 document，Node 下 require 可单测——
+     盒子里画了什么、线接在哪，只有这里的断言能兜住（render() 只产 HTML 外壳）。
      =================================================================== */
-  if (typeof document !== 'undefined' && document.getElementById) {
-    (function () {
-      var ir = JSON.parse(document.getElementById('oh-grasp-ir').textContent);
-      var M = {};
-      ir.modules.forEach(function (m) { M[m.id] = m; });
-      var G = {};
-      (ir.groups || []).forEach(function (g) { G[g.id] = g; });
-
-  // 语言是阅读偏好，不做持久化，每次打开都是默认中文。
-  var state = { lang: DEFAULT_LANG };
-  // 切语言 = 换一个取值子树，立刻重渲染；非法语言忽略。
-  function setLang(lang) {
-    if (LANGS.indexOf(lang) === -1 || state.lang === lang) return;
-    state.lang = lang;
-    render();
-  }
 
   /* ---------- 节点盒 ---------- */
-  // counts: { id: {in,out} }，仅 group 用（×N 端口标）。lang: 'zh' | 'en'。
-  function nodeSvg(id, x, y, counts, lang) {
+  // id: 单元 id；counts: countPorts 的结果（只对 group 生效）；M / G: 模块 / 分组索引
+  // （调用方传进来——内核不持有模型，因此这里能拿测试数据直接调）；lang: 'zh' | 'en'。
+  function nodeSvg(id, x, y, counts, lang, M, G) {
     var isGrp = !!G[id], m = M[id], g = G[id];
     var w = isGrp ? GW : CW, h = isGrp ? GH : CH;
     // group.label 是模型起的抽象名（可译）；模块 label 是源码标识符 / 包名（绝不译）。
@@ -377,42 +394,113 @@
     s += '<text x="' + (x + 16) + '" y="' + (y + 53) + '" font-size="' + descFs + '" fill="#5b6472">' + esc(lines[0]) + '</text>';
     s += '<text x="' + (x + 16) + '" y="' + (y + 69) + '" font-size="' + descFs + '" fill="#5b6472">' + esc(lines[1]) + '</text>';
     if (isGrp) {
-      var cnt = counts && counts[id] ? counts[id] : { in: 0, out: 0 };
+      var cnt = (counts && counts[id]) || emptyPort();   // 只读：missing 时借零值，不写回
       var cxi = x + w / 2;
-      // ADR-0006: 空方向不画空端口 —— 端口只在对应方向真有边时出现（旁标 ×N）。
-      if (cnt.in) {
-        s += '<circle class="port" data-id="' + esc(id) + '" data-port="in" cx="' + cxi + '" cy="' + y + '" r="6" fill="#ffffff" stroke="#6366f1" stroke-width="1.5"/>';
-        s += '<text x="' + (cxi + 9) + '" y="' + (y + 7) + '" font-size="10" fill="#4338ca">×' + cnt.in + '</text>';
-      }
-      if (cnt.out) {
-        s += '<circle class="port" data-id="' + esc(id) + '" data-port="out" cx="' + cxi + '" cy="' + (y + h) + '" r="6" fill="#ffffff" stroke="#6366f1" stroke-width="1.5"/>';
-        s += '<text x="' + (cxi + 9) + '" y="' + (y + h - 6) + '" font-size="10" fill="#4338ca">×' + cnt.out + '</text>';
-      }
+      // 两个方向都画端口：空方向标「—」而不是不画（ADR-0009，取代 ADR-0006 的「空方向不画端口」）。
+      s += portMark(id, 'in', cxi, y, cnt.in, cnt.inRep, lang);
+      s += portMark(id, 'out', cxi, y + h, cnt.out, cnt.outRep, lang);
     }
     return s;
+  }
+
+  /* ---------- 端口圆点 + 标注 ---------- */
+  // 圆点画在盒边缘（入 = 顶 `cy = y`、出 = 底 `cy = y + h`）、盒宽中点，`class="port"` 供事件绑定。
+  // N > 0 时标注 `×N 代表内容`；N = 0（该方向一条内容都没有）时刻意**不隐藏端口**，显式标「—」
+  // ——「这个方向没有数据」和「图漏画了」是两件事，读者分不清就会以为图错了（ADR-0009）。
+  // `×N` 与代表内容拼成一段文本交给 fitWidth：整段按 REP_W 截断，数字在段首不会被截掉。
+  function portMark(id, dir, cx, cy, n, rep, lang) {
+    var s = '<circle class="port" data-id="' + esc(id) + '" data-port="' + dir + '" cx="' + cx + '" cy="' + cy + '" r="6" fill="#ffffff" stroke="#6366f1" stroke-width="1.5"/>';
+    var txt = n ? '×' + n : tr(lang, 'dash');
+    var body = n ? pick(rep, lang) : '';   // 代表内容跟着显示语言走；N 由 countPorts 按 zh 去重，不变
+    if (body) txt += ' ' + body;
+    s += '<text x="' + (cx + 9) + '" y="' + (dir === 'in' ? cy + 7 : cy - 6) + '" font-size="10" fill="#4338ca">' + esc(fitWidth(txt, 10, REP_W)) + '</text>';
+    return s;
+  }
+
+  /* ---------- 端口清单（点端口弹出） ---------- */
+  // 单元显示名：group 的抽象名可译，模块名是源码标识符 / 包名，**绝不译**。
+  function unitName(id, lang, M, G) {
+    return G[id] ? pick(G[id].label, lang) : M[id].label;
+  }
+
+  /* 端口清单的行数据。行数 === countPorts 在该方向的种数——两处**同一把键**
+     （pick(label, 'zh')），所以点开数得清，且切语言行数不变（去重键不是显示语言）。
+     组内取 IR 顺序第一条 connection 的 label 当该行的「内容」（与 ×N 右侧的代表内容同一规则）；
+     对端按首现顺序去重，多个时交给 uniqJoin 收尾成 `a · b +2`。
+     返回 [{ rep: <原始 label 字段>, peers: [单元 id…] }]，保 IR 顺序。 */
+  function portRows(id, dir, edges) {
+    // byKey 的键是 label 文本（用户数据），普通 {} 会被 "constructor" 这类文本命中，故用无原型对象。
+    var byKey = Object.create(null), order = [];
+    (edges || []).forEach(function (e) {
+      // 点开的单元在这一端固定不变（出 = from、入 = to），变的只有对端。
+      if (dir === 'in' ? e.to !== id : e.from !== id) return;
+      var peer = dir === 'in' ? e.from : e.to;
+      (e.conns || []).forEach(function (cn) {
+        var txt = pick(cn ? cn.label : '', 'zh');
+        if (!txt) return;
+        var row = byKey[txt];
+        if (!row) { row = byKey[txt] = { rep: cn.label, peers: [] }; order.push(row); }
+        if (peer && row.peers.indexOf(peer) === -1) row.peers.push(peer);
+      });
+    });
+    return order;
+  }
+
+  // 一行的 HTML：`源 → 内容 → 目标`，箭头方向就是数据流方向（入端口时对端在左）。
+  function portListHtml(id, dir, edges, lang, M, G) {
+    return portRows(id, dir, edges).map(function (row) {
+      var peers = esc(uniqJoin(row.peers.map(function (p) { return unitName(p, lang, M, G); })));
+      var self = esc(unitName(id, lang, M, G));
+      var src = dir === 'in' ? peers : self;
+      var dst = dir === 'in' ? self : peers;
+      return '<div class="vA-pp-row"><span class="vA-pp-mod">' + src + '</span><span class="vA-pp-arrow">→</span><span class="vA-pp-lab">' + esc(pick(row.rep, lang)) + '</span><span class="vA-pp-arrow">→</span><span class="vA-pp-mod">' + dst + '</span></div>';
+    }).join('');
+  }
+
+  /* ---------- 边（前向 + 反馈）路径 ---------- */
+  // 入边终点落在目标盒上边缘**上方** PORT_GAP px（即端口圆点外缘之上），箭头才不会被后画的
+  // 盒体 / 端口圆点盖住（ADR-0009）。层序不动：节点仍画在边之后，只让箭头露出来。
+  function fwdPath(a, b, sA, sB) {
+    var x1 = a.x + sA.w / 2, y1 = a.y + sA.h;
+    var x2 = b.x + sB.w / 2, y2 = b.y - PORT_GAP;
+    var my = (y1 + y2) / 2;
+    return { d: 'M' + x1 + ' ' + y1 + ' C ' + x1 + ' ' + my + ' ' + x2 + ' ' + my + ' ' + x2 + ' ' + y2, xm: (x1 + x2) / 2, my: my };
+  }
+  function feedbackPath(a, b, sA, sB, gx) {
+    var x1 = a.x + sA.w / 2, y1 = a.y + sA.h;      // 源底（出）
+    var x2 = b.x + sB.w / 2, y2 = b.y - PORT_GAP;  // 目标顶（入）上方 PORT_GAP，与前向边一致
+    var d = 'M' + x1 + ' ' + y1 +
+      ' C ' + x1 + ' ' + (y1 + 18) + ' ' + gx + ' ' + (y1 + 18) + ' ' + gx + ' ' + (y1 + 6) +
+      ' L ' + gx + ' ' + (y2 - 14) +
+      ' C ' + gx + ' ' + (y2 - 6) + ' ' + (x1 + (gx - x1) * 0.4) + ' ' + (y2 - 6) + ' ' + x2 + ' ' + y2;
+    return { d: d, mid: (y1 + y2) / 2 };
+  }
+
+  /* ===================================================================
+     以下为浏览器端 DOM 应用（需 #oh-grasp-ir 内嵌 JSON + #root 等骨架）。
+     Node 环境（单测 / 语法检查）没有 document，整段跳过。
+     =================================================================== */
+  if (typeof document !== 'undefined' && document.getElementById) {
+    (function () {
+      var ir = JSON.parse(document.getElementById('oh-grasp-ir').textContent);
+      var M = {};
+      ir.modules.forEach(function (m) { M[m.id] = m; });
+      var G = {};
+      (ir.groups || []).forEach(function (g) { G[g.id] = g; });
+
+  // 语言是阅读偏好，不做持久化，每次打开都是默认中文。
+  var state = { lang: DEFAULT_LANG };
+  // 切语言 = 换一个取值子树，立刻重渲染；非法语言忽略。
+  function setLang(lang) {
+    if (LANGS.indexOf(lang) === -1 || state.lang === lang) return;
+    state.lang = lang;
+    render();
   }
 
   var markerSeq = 0;
   function markerDef(color) {
     var id = 'mk' + (++markerSeq);
     return { id: id, xml: '<marker id="' + id + '" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="' + color + '"/></marker>' };
-  }
-
-  /* ---------- 边（前向 + 反馈）路径 ---------- */
-  function fwdPath(a, b, sA, sB) {
-    var x1 = a.x + sA.w / 2, y1 = a.y + sA.h;
-    var x2 = b.x + sB.w / 2, y2 = b.y;
-    var my = (y1 + y2) / 2;
-    return { d: 'M' + x1 + ' ' + y1 + ' C ' + x1 + ' ' + my + ' ' + x2 + ' ' + my + ' ' + x2 + ' ' + y2, xm: (x1 + x2) / 2, my: my };
-  }
-  function feedbackPath(a, b, sA, sB, gx) {
-    var x1 = a.x + sA.w / 2, y1 = a.y + sA.h;      // 源底（出）
-    var x2 = b.x + sB.w / 2, y2 = b.y;             // 目标顶（入）
-    var d = 'M' + x1 + ' ' + y1 +
-      ' C ' + x1 + ' ' + (y1 + 18) + ' ' + gx + ' ' + (y1 + 18) + ' ' + gx + ' ' + (y1 + 6) +
-      ' L ' + gx + ' ' + (y2 - 14) +
-      ' C ' + gx + ' ' + (y2 - 6) + ' ' + (x1 + (gx - x1) * 0.4) + ' ' + (y2 - 6) + ' ' + x2 + ' ' + y2;
-    return { d: d, mid: (y1 + y2) / 2 };
   }
 
   function haloText(txt, x, y, anchor) {
@@ -489,12 +577,12 @@
         var lbl = edgeLabel(e, lang);
         if (lbl) part += haloText(fitWidth(lbl, 11, 240), p.xm, p.my - 4, 'middle');
       });
-      // 节点（盖住边端点与箭头根部）
+      // 节点最后画（层序不动，见 ADR-0009：入端已外移 PORT_GAP，箭头落在端口圆点上方露出来）
       g.layers.forEach(function (row) {
         row.forEach(function (id) {
           var p = g.pos[id];
           var kind = G[id] ? 'group' : 'internal';
-          part += '<g class="node" data-id="' + esc(id) + '" data-kind="' + kind + '">' + nodeSvg(id, p.x, p.y, counts, lang) + '</g>';
+          part += '<g class="node" data-id="' + esc(id) + '" data-kind="' + kind + '">' + nodeSvg(id, p.x, p.y, counts, lang, M, G) + '</g>';
         });
       });
       body += '<g transform="translate(0,' + g.top + ')">' + part + '</g>';
@@ -505,7 +593,7 @@
         row.forEach(function (id) {
           var p = grid.pos[id];
           var kind = G[id] ? 'group' : 'internal';
-          gpart += '<g class="node" data-id="' + esc(id) + '" data-kind="' + kind + '">' + nodeSvg(id, p.x, p.y, counts, lang) + '</g>';
+          gpart += '<g class="node" data-id="' + esc(id) + '" data-kind="' + kind + '">' + nodeSvg(id, p.x, p.y, counts, lang, M, G) + '</g>';
         });
       });
       body += '<g transform="translate(' + ((contentW - grid.W) / 2) + ',' + grid.top + ')">' + gpart + '</g>';
@@ -635,8 +723,8 @@
       detail.classList.remove('open');
       root.querySelectorAll('.node').forEach(function (g) { g.classList.remove('sel'); });
     }
-    // 顶层单元的显示名：group 抽象名可译，模块名不译。
-    function unitName(id) { return G[id] ? pick(G[id].label, lang) : M[id].label; }
+    // 顶层单元的显示名：group 抽象名可译，模块名不译（实现搬进内核的 unitName）。
+    function nameOf(id) { return unitName(id, lang, M, G); }
     function openDetail(id) {
       var m = M[id];
       detail.innerHTML =
@@ -701,7 +789,7 @@
         var self = memberIds[c.from] ? M[c.from] : M[c.to];
         var other = memberIds[c.from] ? M[c.to] : M[c.from];
         var dir = memberIds[c.from] ? '→' : '←';
-        return '<div class="vA-bedge"><span class="vA-pp-mod">' + esc(unitName(self.id)) + '</span> <span class="vA-bedge-arrow">' + dir + '</span> <span class="vA-bedge-lab">' + esc(pick(c.label, lang)) + '</span> <span class="vA-bedge-arrow">' + dir + '</span> <span class="vA-pp-mod">' + esc(unitName(other.id)) + '</span></div>';
+        return '<div class="vA-bedge"><span class="vA-pp-mod">' + esc(nameOf(self.id)) + '</span> <span class="vA-bedge-arrow">' + dir + '</span> <span class="vA-bedge-lab">' + esc(pick(c.label, lang)) + '</span> <span class="vA-bedge-arrow">' + dir + '</span> <span class="vA-pp-mod">' + esc(nameOf(other.id)) + '</span></div>';
       }).join('');
     }
     function boundaryBlock(boundary, memberIds) {
@@ -710,15 +798,10 @@
       return '<h4>' + esc(tr(lang, 'boundary')) + '</h4><div class="vA-empty">' + esc(tr(lang, 'input')) + ' ' + esc(tr(lang, 'dash')) + ' · ' + esc(tr(lang, 'output')) + ' ' + esc(tr(lang, 'dash')) + '</div>';
     }
     function openPort(id, kind) {
-      var conns = [];
-      topEdges.forEach(function (e) {
-        if ((kind === 'in' && e.to === id) || (kind === 'out' && e.from === id)) conns = conns.concat(e.conns);
-      });
-      var rows = conns.map(function (c) {
-        return '<div class="vA-pp-row"><span class="vA-pp-mod">' + esc(unitName(c.from)) + '</span><span class="vA-pp-arrow">→</span><span class="vA-pp-lab">' + esc(pick(c.label, lang)) + '</span><span class="vA-pp-arrow">→</span><span class="vA-pp-mod">' + esc(unitName(c.to)) + '</span></div>';
-      }).join('');
+      // 行数 === 盒上那个 `×N`（同一把 zh 去重键，见内核 portRows / portListHtml）。
+      var rows = portListHtml(id, kind, topEdges, lang, M, G);
       detail.innerHTML = '<div class="vA-modal vA-modal-sm">' +
-        '<div class="vA-detail-head"><span class="vA-detail-name">' + esc(kind === 'in' ? tr(lang, 'input') : tr(lang, 'output')) + '</span><span class="vA-detail-kind">' + esc(unitName(id)) + '</span><button class="vA-detail-close" id="detailClose">×</button></div>' +
+        '<div class="vA-detail-head"><span class="vA-detail-name">' + esc(kind === 'in' ? tr(lang, 'input') : tr(lang, 'output')) + '</span><span class="vA-detail-kind">' + esc(nameOf(id)) + '</span><button class="vA-detail-close" id="detailClose">×</button></div>' +
         (rows || '<div class="vA-empty">' + esc(tr(lang, 'none')) + '</div>') + '</div>';
       detail.classList.add('open');
       detail.querySelector('#detailClose').addEventListener('click', closeDetail);
@@ -814,9 +897,12 @@
     module.exports = {
       fitWidth: fitWidth, wrap2: wrap2,
       pick: pick, pickList: pickList, T: T, tr: tr, fmt: fmt,
-      edgeLabel: edgeLabel, countPorts: countPorts,
+      edgeLabel: edgeLabel, uniqJoin: uniqJoin, countPorts: countPorts,
       aggregateEdges: aggregateEdges,
       components: components, flowGeometry: flowGeometry, gridGeometry: gridGeometry,
+      // 纯字符串渲染内核：盒体、边路径、端口清单（往上搬出 document 门，好让「画了什么」可断言）
+      nodeSvg: nodeSvg, fwdPath: fwdPath, feedbackPath: feedbackPath,
+      unitName: unitName, portRows: portRows, portListHtml: portListHtml,
     };
   }
 })();

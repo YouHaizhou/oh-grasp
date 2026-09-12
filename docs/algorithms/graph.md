@@ -129,15 +129,19 @@ layer[v] = max(layer[v], layer[u] + 1)
 
 ## 7. 端口计数
 
-**问题**：折叠后 group 盒子上要标 `×N`——这个 N 是多少条连线。
+**问题**：折叠后 group 盒子上要标 `×N`——这个 N 是多少。
 
-**做法**：遍历所有聚合边，对每条边里的**每条原始 connection**，源 side `out++`、目标 side `in++`。注意计数单元是 connection（真实数据流），不是聚合边——聚合边是渲染层的合并，不该影响计数。
+**做法**：遍历所有聚合边，对每条边里的**每条原始 connection**，源 side 记「出」、目标 side 记「入」，但每个方向**按内容去重后才计数**：同向多条 connection 内容相同只算一种。计数单元仍是 connection（真实数据流），不是聚合边——聚合边是渲染层的合并，不该影响计数。
+
+**为什么不是连接条数**：`grp_arg_parse` 的出端口有 12 条连接，其实只有 4 种内容——标 12 会让「点开数得清」落空。**去重键是 label 的 `zh` 文本**（不是连接条数、不是 label id、也不是 en 文本）。按 `zh` 而不是按当前显示语言，是因为按显示语言去重会让切到英文时 `×12` 变成 `×9`，读者会以为结构变了。
+
+同时带出**代表内容**：该方向 IR 顺序第一条 connection 的 label 字段（原样存，渲染时按当前语言 `pick`），由 `nodeSvg` 画在 `×N` 右侧。返回 `{ id: { in, out, inRep, outRep } }`——`in`/`out` 是内容种数，`inRep`/`outRep` 是代表内容的 label 字段。
+
+**点开的清单也用同一把尺子**：`×N` 说「4 种内容」，点开却列 12 行，就是同一处不一致换了个方向——「点开数得清」落空。所以端口清单（`portRows` / `portListHtml`）**分组键与 `countPorts` 完全一致**（`pick(label, 'zh')`），行数因此恒等于 `×N`，切语言行数也不变。组内取 IR 顺序第一条 connection 的 label 当该行内容（与 `inRep`/`outRep` 同一规则）；点开的单元在出方向恒为 `from`、入方向恒为 `to`，唯一在变的是**对端**——对端按首现顺序去重，多个时走 `uniqJoin` 收尾（见第 8 节，与边中点标签同一套表示）。
 
 **复杂度**：O(E)。
-**位置**：viewer.js:71。
-**测试**：`test/layout.test.js` —「countPorts tallies per-direction connection counts」。
-
-**注意**：口径已由 ADR-0008 改为「不同内容种数」而非「连接条数」，此函数待改。
+**位置**：viewer.js:138（`countPorts`）、viewer.js:431（`portRows`）、viewer.js:450（`portListHtml`）。
+**测试**：`test/layout.test.js` —「countPorts counts distinct content kinds per direction, not connections」、「countPorts works on monolingual artifacts (plain-string labels)」（单语产物：普通字符串按 zh 取值就是它本身，所以 N 不变）、「bilingual fixture exercises dedup: kinds < connection count」、「port list rows equal ×N on the bilingual fixture (kinds < connections)」、「port list rows equal ×N on a real-artifact-shaped port (8 connections, 4 kinds)」、「port list rows equal ×N on a monolingual graph (plain-string labels)」、「every port of the bilingual fixture has as many list rows as ×N, in both languages」。
 
 ---
 
@@ -147,11 +151,13 @@ layer[v] = max(layer[v], layer[u] + 1)
 
 **做法**：按 label 字符串去重（保持首次出现顺序），≤3 个用 ` · ` 连起来；多于 3 个只取前 2 个 + ` +N`（N = 剩余不同标签数）。用「不同标签数」而不是「连接数」，是因为 `+N` 要传达「还有 N 种别的东西」，重复的东西不该计数。
 
+这套「去重 + 首现顺序 + `a · b +2`」抽成了 `uniqJoin`：**边中点标签与端口清单的对端共用同一套表示**（读者学一次规则能用两处，ADR-0011 对反向索引也是这个思路）。`edgeLabel(e, lang)` 现在只是「按语言取值 → `uniqJoin`」。
+
 **注意**：47 条 connection 只有 20 个不同 label（`renderer script path` 一类反复出现），所以去重口径直接决定中点显示什么。ADR-0008 定了**按 zh 文本去重**（语言无关，切换语言数字不变），此函数待改。
 
 **复杂度**：O(n²)（`indexOf` 查重），n = 该边折的 connection 数（≤12），无碍。
-**位置**：viewer.js:85。
-**测试**：`test/layout.test.js` —「edgeLabel dedupes and truncates at 3 unique labels」。
+**位置**：viewer.js:167（`uniqJoin`）、viewer.js:178（`edgeLabel`）。
+**测试**：`test/layout.test.js` —「edgeLabel dedupes and truncates at 3 unique labels」、「port list collapses many peers with the same · / +N convention as edge labels」。
 
 ---
 

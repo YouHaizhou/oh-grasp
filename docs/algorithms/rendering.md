@@ -70,13 +70,13 @@ JSON 里 `<` 是合法的转义目标——`<` 与 `<` 在 JSON 语义上完全�
 
 浏览器里整段执行（两个条件都真）；Node 里 `document` 未定义，下部整段跳过，上部导出可用。
 
-**导出清单**：`fitWidth, wrap2, pick, pickList, T, tr, fmt, edgeLabel, countPorts, aggregateEdges, components, flowGeometry, gridGeometry`——即所有纯算法函数与文案表。
+**导出清单**：`fitWidth, wrap2, pick, pickList, T, tr, fmt, edgeLabel, uniqJoin, countPorts, aggregateEdges, components, flowGeometry, gridGeometry, nodeSvg, fwdPath, feedbackPath, unitName, portRows, portListHtml`——即所有纯算法函数与文案表，外加纯字符串的渲染内核（盒体、边路径、端口清单）。**`nodeSvg` / `fwdPath` / `feedbackPath` 本来写在门内**（它们不碰 `document`，只是位置不对），端口口径与外移端点都落在它们身上，搬出 document 门才断言得到（`render()` 只产 HTML 外壳，从不生成盒体）。端口清单同理：行数据（`portRows`）与行 HTML（`portListHtml`）都在内核，DOM 门里只剩「把这份 HTML 塞进弹窗 + 绑关闭事件」。
 
-**语言怎么进去**：语言**不是**内核状态，而是参数。`pick(field, lang)` 收口全部散文字段（`{zh, en}` 按语言取值，旧形态的普通字符串原样返回），`edgeLabel(e, lang)`、`nodeSvg(id, x, y, counts, lang)`、`flowSvg(ids, edges, counts, lang)` 逐层把它传下去。DOM 应用把当前语言放在 `state.lang`（不持久化），点 header 的 `#langZh` / `#langEn` 就换值并整页重渲染。`T = {zh, en}` 是查看器固定文案表（输入/输出/依赖/内部数据流/边界数据流/GROUP/INTERNAL/空方向「—」/弹窗分节标题/提示行），`tr(lang, key)` 取它，`fmt(tpl, n)` 填 `{n}` 占位——它在内核里，因此「两种语言的键一一对应」可单测。
+**语言怎么进去**：语言**不是**内核状态，而是参数。`pick(field, lang)` 收口全部散文字段（`{zh, en}` 按语言取值，旧形态的普通字符串原样返回），`edgeLabel(e, lang)`、`nodeSvg(id, x, y, counts, lang, M, G)`、`flowSvg(ids, edges, counts, lang)`、`portListHtml(id, dir, edges, lang, M, G)` 逐层把它传下去。`nodeSvg` / `portListHtml` 额外收模型索引 `M` / `G`（内核不持有模型，测试才好直接喂数据）。DOM 应用把当前语言放在 `state.lang`（不持久化），点 header 的 `#langZh` / `#langEn` 就换值并整页重渲染。`T = {zh, en}` 是查看器固定文案表（输入/输出/依赖/内部数据流/边界数据流/GROUP/INTERNAL/空方向「—」/弹窗分节标题/提示行），`tr(lang, key)` 取它，`fmt(tpl, n)` 填 `{n}` 占位——它在内核里，因此「两种语言的键一一对应」可单测。
 
-**这条分界的价值**：`oh-grasp/test/layout.test.js` 的 25 个测试全部直接 `require('../viewer.js')`，零 DOM 依赖、毫秒级。DOM 那一层的正确性由另一套东西兜——`oh-grasp/fortest/smoke-viewer.js` 用最小 DOM 桩跑完整装载路径（见下）。
+**这条分界的价值**：`oh-grasp/test/layout.test.js` 的 39 个测试全部直接 `require('../viewer.js')`，零 DOM 依赖、毫秒级。DOM 那一层的正确性由另一套东西兜——`oh-grasp/fortest/smoke-viewer.js` 用最小 DOM 桩跑完整装载路径（见下）。
 
-**位置**：viewer.js:285（分界）、viewer.js:733（导出）。
+**位置**：viewer.js:483（分界）、viewer.js:897（导出）。
 
 ---
 

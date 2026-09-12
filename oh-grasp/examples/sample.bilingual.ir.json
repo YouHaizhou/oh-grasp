@@ -89,6 +89,11 @@
       "label": { "zh": "解析后的配置对象", "en": "the parsed config object" }
     },
     {
+      "from": "parse_config",
+      "to": "build_index",
+      "label": { "zh": "解析后的配置对象", "en": "the parsed config object" }
+    },
+    {
       "from": "process_records",
       "to": "build_index",
       "label": { "zh": "带来源标记的记录", "en": "records tagged with their source" }
