@@ -92,8 +92,9 @@
       groupMeta: 'group · {n} 模块',
       innerFlow: '内部数据流', boundary: '边界数据流', members: '成员模块',
       none: '无', dash: '—', feedback: '反馈',
-      groupTag: 'GROUP', internalTag: 'INTERNAL',
+      groupTag: 'GROUP', internalTag: 'INTERNAL', externalTag: 'EXTERNAL',
       edge: '连线', fourParts: '四段说明',
+      consumers: '消费者 Consumers', consumersNone: '无（按导入符号匹配，未命中）', consumersBlind: '无具名导入可匹配（default 导入）',
       fp_source: '来源', fp_process: '处理', fp_output: '输出', fp_purpose: '用途',
     },
     en: {
@@ -104,8 +105,9 @@
       groupMeta: 'group · {n} modules',
       innerFlow: 'Internal data flow', boundary: 'Boundary data flow', members: 'Member modules',
       none: 'None', dash: '—', feedback: 'feedback',
-      groupTag: 'GROUP', internalTag: 'INTERNAL',
+      groupTag: 'GROUP', internalTag: 'INTERNAL', externalTag: 'EXTERNAL',
       edge: 'Connection', fourParts: 'Four-part description',
+      consumers: 'Consumers', consumersNone: 'None (no imported symbol matched)', consumersBlind: 'No named import to match (default import)',
       fp_source: 'Source', fp_process: 'Process', fp_output: 'Output', fp_purpose: 'Purpose',
     }
   };
@@ -456,14 +458,71 @@
     return order;
   }
 
-  // 一行的 HTML：`源 → 内容 → 目标`，箭头方向就是数据流方向（入端口时对端在左）。
+  // 一行清单的 HTML：`源 → 内容 → 目标`，箭头方向就是数据流方向。**两个清单共用**（端口清单、
+  // 消费者清单）——ADR-0011 的「学一次行语法，用在两处」。三个参数都收**已转义**的字符串，
+  // 转义在各自的调用点做（两边的取值路径不同，硬凑进来反而绕）。
+  function rowHtml(src, lab, dst) {
+    return '<div class="vA-pp-row"><span class="vA-pp-mod">' + src + '</span>' +
+      '<span class="vA-pp-arrow">→</span><span class="vA-pp-lab">' + lab + '</span>' +
+      '<span class="vA-pp-arrow">→</span><span class="vA-pp-mod">' + dst + '</span></div>';
+  }
+
+  // 端口清单的行：`源 → 内容 → 目标`（入端口时对端在左，所以 src/dst 按方向对调）。
   function portListHtml(id, dir, edges, lang, M, G) {
     return portRows(id, dir, edges).map(function (row) {
       var peers = esc(uniqJoin(row.peers.map(function (p) { return unitName(p, lang, M, G); })));
       var self = esc(unitName(id, lang, M, G));
-      var src = dir === 'in' ? peers : self;
-      var dst = dir === 'in' ? self : peers;
-      return '<div class="vA-pp-row"><span class="vA-pp-mod">' + src + '</span><span class="vA-pp-arrow">→</span><span class="vA-pp-lab">' + esc(pick(row.rep, lang)) + '</span><span class="vA-pp-arrow">→</span><span class="vA-pp-mod">' + dst + '</span></div>';
+      return dir === 'in'
+        ? rowHtml(peers, esc(pick(row.rep, lang)), self)
+        : rowHtml(self, esc(pick(row.rep, lang)), peers);
+    }).join('');
+  }
+
+  /* ---------- 消费者清单（点依赖卡片弹出）----------
+     回答「谁用了这个 external」（ADR-0010 第四个入口 / ADR-0011 的反向索引）。ADR-0011 的长期答案
+     是 internal 模块上的 `uses` 字段，但那个字段今天还不存在（schema 里没有、validate 硬拒
+     external 端点、IR 里 0 条），所以这里用现成的唯一信号：external 的**具名导入符号**
+     （`input` 里除 'default' 外的项，恰好就是「它被消费的成员」）在 internal 模块的 source 里
+     作为独立标识符出现。这与 round19 那次代理估算（`.scratch/count-ext-uses.js`）同一把尺子。
+     **已知盲区**（继承自同一把尺子，别当 bug 修）：default 导入的依赖（node:fs / node:os /
+     node:path …）没有符号名可匹配，恒返回 0 行；source 里也不含 import 语句，退不到按包名匹配。
+     票 06 把 `uses` 填进 IR 之后，这两个函数改读字段即可（弹窗那侧一个字都不用动）。 */
+  // external 的具名导入成员：`input` 里除 'default' 外的项（default 导入没有符号名可匹配）。
+  function extSymbols(m) {
+    return ((m && m.input) || []).filter(function (s) { return hasText(s) && s !== 'default'; });
+  }
+  // 标识符在源码里作为**独立词**出现：`respawn` 不该被 `spawn` 命中，`fs.readFileSync` 该被
+  // `readFileSync` 命中。用两侧负字符类而不是 `\b`——符号可以带 `$`，而 `\b` 只认 [A-Za-z0-9_]。
+  function hasSymbol(src, sym) {
+    if (!hasText(src) || !hasText(sym)) return false;
+    var lit = String(sym).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp('(^|[^A-Za-z0-9_$])' + lit + '([^A-Za-z0-9_$]|$)').test(src);
+  }
+
+  /* 消费者清单的行数据。行 = **一个 internal 模块**，保 IR 顺序；hits = 它用到的该 external 的
+     具名成员（保 `input` 顺序），即这行「凭什么说它是消费者」的证据。
+     返回 [{ id, label, hits }]——空数组有两种含义，调用方要靠 extSymbols 区分：
+     「有具名成员但没人用」与「default 导入，本版看不见（consumersBlind）」。 */
+  function consRows(id, modules) {
+    var ext = null;
+    (modules || []).forEach(function (m) { if (m.id === id) ext = m; });
+    if (!ext) return [];
+    var syms = extSymbols(ext);
+    if (!syms.length) return [];
+    return (modules || []).filter(function (m) { return m.type === 'internal'; }).map(function (m) {
+      var hits = syms.filter(function (s) { return hasSymbol(m.source, s); });
+      return hits.length ? { id: m.id, label: m.label, hits: hits } : null;
+    }).filter(Boolean);
+  }
+
+  // 消费者清单的行：`消费者 → 用到的符号 → 这个 external`——同一个 `rowHtml`（ADR-0011）。
+  // 行**不可点**：「清单行可点 + 一层返回」是票 05 的第二片。
+  function consListHtml(id, lang, modules, M) {
+    var rows = consRows(id, modules);
+    if (!rows.length) return '';
+    var target = esc(modName(id, M));
+    return rows.map(function (r) {
+      return rowHtml(esc(r.label), esc(r.hits.join(' · ')), target);
     }).join('');
   }
 
@@ -793,12 +852,16 @@
       '<div class="group"><span class="cap">' + esc(tr(lang, 'input')) + '</span>' + io(ir.meta.input) + '</div>' +
       '<div class="group"><span class="cap">' + esc(tr(lang, 'output')) + '</span>' + io(ir.meta.output) + '</div>' +
       '</div></header>';
+    // 依赖卡片 = 第四个入口（ADR-0010）：点开该 external 的消费者清单。
+    // 用 <button type="button"> 与 .vA-mcard 同一个理由——可点就该是可聚焦的真按钮（Esc 那条
+    // 故事同理：键盘用户不该被困住）；子元素因此用 <span>（button 的内容模型是短语，不是流）。
     var extRail =
       '<aside class="vA-ext"><div class="vA-sec">' + esc(tr(lang, 'deps')) + '</div>' +
       ext.map(function (m) {
-        return '<div class="vA-extcard"><div class="vA-extname">' + esc(m.label) + '</div>' +
-          '<div class="vA-extdesc">' + esc(pick(m.description, lang)) + '</div>' +
-          '<div class="vA-extuse">↳ ' + esc((m.input || []).join(', ')) + '</div></div>';
+        return '<button type="button" class="vA-extcard" data-id="' + esc(m.id) + '">' +
+          '<span class="vA-extname">' + esc(m.label) + '</span>' +
+          '<span class="vA-extdesc">' + esc(pick(m.description, lang)) + '</span>' +
+          '<span class="vA-extuse">↳ ' + esc((m.input || []).join(', ')) + '</span></button>';
       }).join('') + '</aside>';
 
     // 折叠拓扑：group 与未分组叶子当顶层单元；同向连接聚合。
@@ -840,20 +903,144 @@
     }
     // 顶层单元的显示名：group 抽象名可译，模块名不译（实现搬进内核的 unitName）。
     function nameOf(id) { return unitName(id, lang, M, G); }
-    // 点边 → 四段说明。第三个弹窗（先照 openDetail / openGroup 的样子写；合并成一个组件是票 05）。
-    // 聚合边（conns 多条）列出其下**每条** connection 的四段，按来源模块分组——组内那些原子
-    // connection 在画布上没有可见的线，这里是它们唯一的到达路径（ADR-0008）。
-    function openEdge(e) {
-      if (!e) return;
-      detail.innerHTML = '<div class="vA-modal vA-modal-wide">' +
-        '<div class="vA-detail-head"><span class="vA-detail-name">' + esc(nameOf(e.from)) + ' → ' + esc(nameOf(e.to)) + '</span>' +
-        '<span class="vA-detail-kind">' + esc(tr(lang, 'edge')) + '</span>' +
-        '<button class="vA-detail-close" id="detailClose">×</button></div>' +
-        '<h4>' + esc(tr(lang, 'fourParts')) + '</h4>' + fourPartHtml(e, lang, M) +
-        '</div>';
+
+    /* ---------- 一个弹窗：内容只有一个容器（ADR-0010） ----------
+       四个入口（点节点 / 点端口 / 点边 / 点依赖卡片）各自产出一份**入口描述**
+       { name, kind, html, cls, mount }，剩下的事只有一件：openModal 把外壳画出来——
+       标题、kind 标签、× 按钮、`.open`，以及**唯一**的一处 `#detailClose` 绑定。
+       入口因此退成一行 `openModal(xxxSpec(...))`。
+       - name / kind 收进来的是**未转义原文**，转义在 openModal 里做一次（原来五个地方各 esc 一遍）；
+       - cls 是弹窗宽度档（'' / vA-modal-wide / vA-modal-sm）；
+       - mount 是「塞进去之后才做得了的事」（子图的缩放控制器、节点选中态、网格卡片的点击），
+         没有它这一步的描述就留空。
+       弹窗**不**记返回栈：「清单行可点 + 一层返回」是票 05 的第二片（本片刻意不做）。 */
+    function openModal(spec) {
+      detail.innerHTML = '<div class="vA-modal' + (spec.cls ? ' ' + spec.cls : '') + '">' +
+        '<div class="vA-detail-head"><span class="vA-detail-name">' + esc(spec.name) + '</span>' +
+        '<span class="vA-detail-kind">' + esc(spec.kind) + '</span>' +
+        '<button class="vA-detail-close" id="detailClose">×</button></div>' + spec.html + '</div>';
       detail.classList.add('open');
       detail.querySelector('#detailClose').addEventListener('click', closeDetail);
+      if (spec.mount) spec.mount();
     }
+
+    // 内容①：叶子 / 模块详情。kind 取模块**自己的**类型，切语言跟着走。
+    // 但 external 那一支今天是**防御性**的：openDetail 的三个调用点（节点点击、组成员网格、
+    // 子图节点点击）拿到的 id 全部来自只收 internal 的节点集，所以这里收不到 external id。
+    // 留着是因为「按 m.type 取"本来就是对的"——别再退回写死字面量。
+    function detailSpec(id) {
+      var m = M[id];
+      return {
+        name: m.label,
+        kind: tr(lang, m.type === 'external' ? 'externalTag' : 'internalTag'),
+        cls: '',
+        html: '<p class="vA-detail-desc">' + esc(pick(m.detail || m.description, lang)) + '</p>' +
+          (m.source ? '<h4>' + esc(tr(lang, 'source')) + (typeof m.sourceLine === 'number' ? ' · ' + esc(fmt(tr(lang, 'line'), m.sourceLine)) : '') + '</h4><pre class="vA-src"><code>' + esc(m.source) + '</code></pre>' : ''),
+        mount: function () {
+          root.querySelectorAll('.node').forEach(function (g) { g.classList.toggle('sel', g.dataset.id === id); });
+        }
+      };
+    }
+
+    // 内容②③：group 两支——有内边 → 子图 flow；无边 → 成员卡片网格（都带边界两段）。
+    function groupSpec(id) {
+      var g = G[id];
+      var members = ir.modules.filter(function (m) { return m.type === 'internal' && m.group === id; });
+      var memberIds = {};
+      members.forEach(function (m) { memberIds[m.id] = true; });
+      var inner = (ir.connections || []).filter(function (c) { return memberIds[c.from] && memberIds[c.to]; });
+      var boundary = (ir.connections || []).filter(function (c) {
+        return (memberIds[c.from] && !memberIds[c.to]) || (!memberIds[c.from] && memberIds[c.to]);
+      });
+      var spec = {
+        name: pick(g.label, lang),
+        kind: fmt(tr(lang, 'groupMeta'), members.length),
+        cls: 'vA-modal-wide',
+        html: '<p class="vA-detail-desc">' + esc(pick(g.description, lang)) + '</p>'
+      };
+
+      if (inner.length) {
+        var innerEdges = aggregateEdges(inner);
+        var ids = members.map(function (m) { return m.id; });
+        var sub = flowSvg(ids, innerEdges, null, lang);
+        spec.html += '<h4>' + esc(tr(lang, 'innerFlow')) + '</h4>' +
+          '<div class="vA-flow vA-flow-sub" id="subViewport"><div class="vA-zoom" id="subZoom">' + sub.svg + '</div></div>';
+        spec.html += boundaryBlock(boundary, memberIds);
+        spec.mount = function () {
+          var sCtl = attachFlow(detail.querySelector('#subViewport'), detail.querySelector('#subZoom'), sub.W, sub.H, null);
+          detail.querySelectorAll('.node').forEach(function (n) {
+            n.addEventListener('click', function () {
+              if (sCtl.moved) { sCtl.moved = false; return; }
+              openDetail(n.dataset.id);
+            });
+          });
+          // 子图里的边同样可点（子图的边不折叠，每条 conns 长度 1）。
+          bindEdges(detail, innerEdges, sCtl);
+        };
+        return spec;
+      }
+
+      var cards = members.map(function (m) {
+        return '<button class="vA-mcard" data-id="' + esc(m.id) + '" type="button"><span class="vA-mcard-name">' + esc(m.label) + '</span><span class="vA-mcard-desc">' + esc(pick(m.description, lang)) + '</span></button>';
+      }).join('');
+      spec.html += '<h4>' + esc(tr(lang, 'members')) + '</h4><div class="vA-mgrid">' + cards + '</div>' +
+        boundaryBlock(boundary, memberIds);
+      spec.mount = function () {
+        detail.querySelectorAll('.vA-mcard').forEach(function (card) {
+          card.addEventListener('click', function () { openDetail(card.dataset.id); });
+        });
+      };
+      return spec;
+    }
+
+    // 内容④：端口清单（行数 === 盒上那个 `×N`，见内核 portRows / portListHtml）。
+    function portSpec(id, kind) {
+      var rows = portListHtml(id, kind, topEdges, lang, M, G);
+      return {
+        name: kind === 'in' ? tr(lang, 'input') : tr(lang, 'output'),
+        kind: nameOf(id),
+        cls: 'vA-modal-sm',
+        html: rows || '<div class="vA-empty">' + esc(tr(lang, 'none')) + '</div>'
+      };
+    }
+
+    // 内容⑤：点边 → 四段说明。聚合边（conns 多条）列出其下**每条** connection 的四段，
+    // 按来源模块分组——组内那些原子 connection 在画布上没有可见的线，这里是它们唯一的
+    // 到达路径（ADR-0008）。
+    function edgeSpec(e) {
+      return {
+        name: nameOf(e.from) + ' → ' + nameOf(e.to),
+        kind: tr(lang, 'edge'),
+        cls: 'vA-modal-wide',
+        html: '<h4>' + esc(tr(lang, 'fourParts')) + '</h4>' + fourPartHtml(e, lang, M)
+      };
+    }
+
+    // 内容⑥：外部依赖的消费者清单（点侧栏依赖卡片）——第四个入口，story 34 / ADR-0011。
+    // 「谁用了这个 external」。行数据与行 HTML 都在内核（consRows / consListHtml），这里
+    // 只把这份 HTML 塞进弹窗。空清单分两种，两句都不说「无」——本版这份清单是**按导入符号
+    // 匹配的代理**（见 consRows），一句干净的「无」会被读成「没人依赖它」，而它可能只是没命中：
+    //   consumersNone  → 有具名成员，但没有模块的 source 命中它
+    //   consumersBlind → 这个 external 只有 default 导入，本版**看不见**它的消费者
+    function consSpec(id) {
+      var m = M[id];
+      var rows = consListHtml(id, lang, ir.modules, M);
+      var empty = extSymbols(m).length ? tr(lang, 'consumersNone') : tr(lang, 'consumersBlind');
+      return {
+        name: m.label,                                    // 包名不译（story 7）
+        kind: tr(lang, 'externalTag'),
+        cls: 'vA-modal-sm',
+        html: '<h4>' + esc(tr(lang, 'consumers')) + '</h4>' +
+          (rows || '<div class="vA-empty">' + esc(empty) + '</div>')
+      };
+    }
+
+    // 四个入口各一行。
+    function openEdge(e) { if (e) openModal(edgeSpec(e)); }
+    function openDetail(id) { openModal(detailSpec(id)); }
+    function openGroup(id) { openModal(groupSpec(id)); }
+    function openPort(id, kind) { openModal(portSpec(id, kind)); }
+    function openConsumers(id) { openModal(consSpec(id)); }
     // 边在画布上的身份 = from|to（聚合边的端点已折叠成顶层单元，conns 仍指向真实模块）。
     // 命中区是整条路径 + 中点标签的白底衬，两者同在一个 <g class="edge"> 里，所以绑在组上：
     // 真实浏览器里点哪个子元素都冒泡到这同一个组 = 同一条边（ADR-0010）。
@@ -868,67 +1055,6 @@
         });
       });
     }
-    function openDetail(id) {
-      var m = M[id];
-      detail.innerHTML =
-        '<div class="vA-modal">' +
-        '<div class="vA-detail-head"><span class="vA-detail-name">' + esc(m.label) + '</span><span class="vA-detail-kind">internal</span><button class="vA-detail-close" id="detailClose">×</button></div>' +
-        '<p class="vA-detail-desc">' + esc(pick(m.detail || m.description, lang)) + '</p>' +
-        (m.source ? '<h4>' + esc(tr(lang, 'source')) + (typeof m.sourceLine === 'number' ? ' · ' + esc(fmt(tr(lang, 'line'), m.sourceLine)) : '') + '</h4><pre class="vA-src"><code>' + esc(m.source) + '</code></pre>' : '') +
-        '</div>';
-      detail.classList.add('open');
-      root.querySelectorAll('.node').forEach(function (g) { g.classList.toggle('sel', g.dataset.id === id); });
-      detail.querySelector('#detailClose').addEventListener('click', closeDetail);
-    }
-    function openGroup(id) {
-      var g = G[id];
-      var members = ir.modules.filter(function (m) { return m.type === 'internal' && m.group === id; });
-      var memberIds = {};
-      members.forEach(function (m) { memberIds[m.id] = true; });
-      var inner = (ir.connections || []).filter(function (c) { return memberIds[c.from] && memberIds[c.to]; });
-      var boundary = (ir.connections || []).filter(function (c) {
-        return (memberIds[c.from] && !memberIds[c.to]) || (!memberIds[c.from] && memberIds[c.to]);
-      });
-
-      var body;
-      if (inner.length) {
-        var innerEdges = aggregateEdges(inner);
-        var ids = members.map(function (m) { return m.id; });
-        var sub = flowSvg(ids, innerEdges, null, lang);
-        body = '<div class="vA-flow vA-flow-sub" id="subViewport"><div class="vA-zoom" id="subZoom">' + sub.svg + '</div></div>';
-        var modal = '<div class="vA-modal vA-modal-wide">';
-        modal += '<div class="vA-detail-head"><span class="vA-detail-name">' + esc(pick(g.label, lang)) + '</span><span class="vA-detail-kind">' + esc(fmt(tr(lang, 'groupMeta'), members.length)) + '</span><button class="vA-detail-close" id="detailClose">×</button></div>';
-        modal += '<p class="vA-detail-desc">' + esc(pick(g.description, lang)) + '</p><h4>' + esc(tr(lang, 'innerFlow')) + '</h4>' + body;
-        modal += boundaryBlock(boundary, memberIds);
-        modal += '</div>';
-        detail.innerHTML = modal;
-        detail.classList.add('open');
-        detail.querySelector('#detailClose').addEventListener('click', closeDetail);
-        var sCtl = attachFlow(detail.querySelector('#subViewport'), detail.querySelector('#subZoom'), sub.W, sub.H, null);
-        detail.querySelectorAll('.node').forEach(function (n) {
-          n.addEventListener('click', function () {
-            if (sCtl.moved) { sCtl.moved = false; return; }
-            openDetail(n.dataset.id);
-          });
-        });
-        // 子图里的边同样可点（子图的边不折叠，每条 conns 长度 1）。
-        bindEdges(detail, innerEdges, sCtl);
-      } else {
-        var cards = members.map(function (m) {
-          return '<button class="vA-mcard" data-id="' + esc(m.id) + '" type="button"><span class="vA-mcard-name">' + esc(m.label) + '</span><span class="vA-mcard-desc">' + esc(pick(m.description, lang)) + '</span></button>';
-        }).join('');
-        detail.innerHTML = '<div class="vA-modal vA-modal-wide">' +
-          '<div class="vA-detail-head"><span class="vA-detail-name">' + esc(pick(g.label, lang)) + '</span><span class="vA-detail-kind">' + esc(fmt(tr(lang, 'groupMeta'), members.length)) + '</span><button class="vA-detail-close" id="detailClose">×</button></div>' +
-          '<p class="vA-detail-desc">' + esc(pick(g.description, lang)) + '</p><h4>' + esc(tr(lang, 'members')) + '</h4><div class="vA-mgrid">' + cards + '</div>' +
-          boundaryBlock(boundary, memberIds) +
-          '</div>';
-        detail.classList.add('open');
-        detail.querySelector('#detailClose').addEventListener('click', closeDetail);
-        detail.querySelectorAll('.vA-mcard').forEach(function (card) {
-          card.addEventListener('click', function () { openDetail(card.dataset.id); });
-        });
-      }
-    }
     function bedgeHtml(boundary, memberIds) {
       return boundary.map(function (c) {
         var self = memberIds[c.from] ? M[c.from] : M[c.to];
@@ -941,15 +1067,6 @@
       if (boundary.length) return '<h4>' + esc(tr(lang, 'boundary')) + '</h4><div class="vA-boundary">' + bedgeHtml(boundary, memberIds) + '</div>';
       // ADR-0006：无组间边时，输入/输出显示「—」而不是留空区/空端口。
       return '<h4>' + esc(tr(lang, 'boundary')) + '</h4><div class="vA-empty">' + esc(tr(lang, 'input')) + ' ' + esc(tr(lang, 'dash')) + ' · ' + esc(tr(lang, 'output')) + ' ' + esc(tr(lang, 'dash')) + '</div>';
-    }
-    function openPort(id, kind) {
-      // 行数 === 盒上那个 `×N`（同一把 zh 去重键，见内核 portRows / portListHtml）。
-      var rows = portListHtml(id, kind, topEdges, lang, M, G);
-      detail.innerHTML = '<div class="vA-modal vA-modal-sm">' +
-        '<div class="vA-detail-head"><span class="vA-detail-name">' + esc(kind === 'in' ? tr(lang, 'input') : tr(lang, 'output')) + '</span><span class="vA-detail-kind">' + esc(nameOf(id)) + '</span><button class="vA-detail-close" id="detailClose">×</button></div>' +
-        (rows || '<div class="vA-empty">' + esc(tr(lang, 'none')) + '</div>') + '</div>';
-      detail.classList.add('open');
-      detail.querySelector('#detailClose').addEventListener('click', closeDetail);
     }
     // 语言切换器：立即生效（整页重渲染），不记忆。
     var zhBtn = root.querySelector('#langZh'), enBtn = root.querySelector('#langEn');
@@ -969,6 +1086,11 @@
         if (ctl.moved) { ctl.moved = false; return; }
         openPort(p.dataset.id, p.dataset.port);
       });
+    });
+    // 第四个入口：侧栏依赖卡片 → 该 external 的消费者清单。这张卡片此前**没有任何点击绑定**，
+    // 不只是「跳错了地方」。卡片不在画布里，没有拖拽阈值这回事，直接绑。
+    root.querySelectorAll('.vA-extcard').forEach(function (c) {
+      c.addEventListener('click', function () { openConsumers(c.dataset.id); });
     });
     bindEdges(root, topEdges, ctl);
     // Esc 关闭弹窗（ADR-0010）。document 上的监听器只注册一次，所以真正的关闭函数走这个槽位——
@@ -1058,6 +1180,8 @@
       // 纯字符串渲染内核：盒体、边路径、端口清单（往上搬出 document 门，好让「画了什么」可断言）
       nodeSvg: nodeSvg, fwdPath: fwdPath, feedbackPath: feedbackPath,
       unitName: unitName, portRows: portRows, portListHtml: portListHtml,
+      // 消费者清单（点依赖卡片）：行数据 + 行 HTML，同款分家（票 05 第四入口）
+      consRows: consRows, consListHtml: consListHtml,
       // 边的可点单元：命中路径 + 中点标签 + hover title 合成同一个带边身份的组（ADR-0010）
       fwdEdgeSvg: fwdEdgeSvg, backEdgeSvg: backEdgeSvg,
       // 四段说明：取值、按来源模块分组的行数据、行 HTML（照 portRows / portListHtml 的分家方式）

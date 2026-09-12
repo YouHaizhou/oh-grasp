@@ -48,10 +48,13 @@ const CSS = `
   .vA-io .chip { font-family: var(--mono); font-size: 12px; background: var(--chip-bg); border: 1px solid var(--chip-border); color: var(--text); padding: 4px 10px; border-radius: 999px; }
   .vA-body { display: grid; grid-template-columns: 220px 1fr; gap: 32px; align-items: start; }
   .vA-sec { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); margin: 0 0 14px; }
-  .vA-extcard { background: var(--canvas); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
-  .vA-extname { font-family: var(--mono); font-size: 15px; font-weight: 600; color: var(--text); }
-  .vA-extdesc { font-size: 12px; color: var(--muted); margin: 4px 0 8px; }
-  .vA-extuse { font-size: 12px; color: var(--accent-deep); font-family: var(--mono); }
+  /* 依赖卡片是第四个入口（ADR-0010）：button 复位成块 + 可点光标（与 .vA-mcard 同款处理，
+     子元素是 span，故各自 display:block 撑回原来的三行版式）。 */
+  .vA-extcard { display: block; width: 100%; text-align: left; font: inherit; cursor: pointer; background: var(--canvas); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
+  .vA-extcard:hover { border-color: var(--accent); }
+  .vA-extname { display: block; font-family: var(--mono); font-size: 15px; font-weight: 600; color: var(--text); }
+  .vA-extdesc { display: block; font-size: 12px; color: var(--muted); margin: 4px 0 8px; }
+  .vA-extuse { display: block; font-size: 12px; color: var(--accent-deep); font-family: var(--mono); }
   .vA-hint { font-size: 12px; color: var(--faint); margin-bottom: 10px; }
   .vA-flow { background: var(--canvas); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; position: relative; height: 580px; cursor: grab; user-select: none; }
   .vA-flow.dragging { cursor: grabbing; }

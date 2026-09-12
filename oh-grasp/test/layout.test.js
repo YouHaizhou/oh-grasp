@@ -433,6 +433,57 @@ test('a connection without a description renders an explicit dash for each segme
   assert.deepEqual(L.fourPartHtml({ conns: [] }, 'zh', {}).length > 0, true, '空边也要给个说法，不能返回空串');
 });
 
+// ---- consRows / consListHtml：依赖卡片的消费者清单（票 05 第四入口） ----
+test('consumer rows are the internal modules whose source uses a named import symbol', () => {
+  // 样例 fixture 里 readConfig 的 source 调了 fs.readFileSync。
+  assert.deepEqual(L.consRows('ext_fs', BI_IR.modules).map((r) => r.id), ['read_config'],
+    '只有真的用到该符号的模块才算消费者');
+  assert.deepEqual(L.consRows('ext_fs', BI_IR.modules)[0].hits, ['readFileSync'],
+    'hits = 命中的具名成员（这行凭什么算消费者）');
+  assert.deepEqual(L.consRows('ext_fs', BI_IR.modules)[0].label, 'readConfig', '行里给的是模块名（不译）');
+});
+
+test('a symbol must appear as a whole word, and default imports stay invisible', () => {
+  const mods = [
+    { id: 'ext_cp', label: 'node:child_process', type: 'external', input: ['spawn', 'spawnSync'] },
+    { id: 'a', label: 'respawner', type: 'internal', source: 'function respawner(){ spawnSync("node"); }' },
+    { id: 'b', label: 'noop', type: 'internal', source: 'function noop(){}' },
+  ];
+  assert.deepEqual(L.consRows('ext_cp', mods).map((r) => r.id), ['a'], '没用到的模块（b）不进清单');
+  assert.deepEqual(L.consRows('ext_cp', mods)[0].hits, ['spawnSync'],
+    'respawner 里的 spawn 不算命中，spawnSync 里的 spawn 也不算（独立词判定）');
+
+  // 已知盲区：default 导入没有符号名可匹配（node:fs / node:os / node:path…），恒 0 行。
+  // 这不是估算实现的问题，是 IR 的形状问题（ADR-0011）——票 06 的 `uses` 才是答案。
+  const blind = [
+    { id: 'ext_path', label: 'node:path', type: 'external', input: ['default'] },
+    { id: 'a', label: 'a', type: 'internal', source: "import path from 'node:path';\n" },
+  ];
+  assert.deepEqual(L.consRows('ext_path', blind), []);
+});
+
+test('consumer list HTML uses the port-list row grammar; unknown ids yield an empty list', () => {
+  const html = L.consListHtml('ext_fs', 'zh', BI_IR.modules, BI_M);
+  assert.equal(rowCount(html), 1, '一行一个消费者');
+  assert.ok(html.includes('readConfig') && html.includes('readFileSync') && html.includes('>fs<'),
+    '行是 `消费者 → 用到的符号 → external`');
+  assert.equal(rowCount(L.consListHtml('ext_fs', 'en', BI_IR.modules, BI_M)), 1, '切语言行数不变');
+  assert.strictEqual(L.consListHtml('ext_nope', 'zh', BI_IR.modules, BI_M), '', '未知 id 不抛错、返回空串');
+  assert.strictEqual(L.consListHtml('ext_fs', 'zh', [], BI_M), '', '空模块表同理');
+});
+
+test('UI copy table carries the consumer-list wording in both languages', () => {
+  ['externalTag', 'consumers', 'consumersNone', 'consumersBlind'].forEach((k) => {
+    assert.ok(k in L.T.zh && k in L.T.en, `缺 ${k}`);
+  });
+  assert.equal(L.T.zh.externalTag, 'EXTERNAL');
+  assert.equal(L.T.en.externalTag, 'EXTERNAL');
+  assert.notEqual(L.T.zh.consumers, L.T.en.consumers, '分节标题随语言切换');
+  assert.ok(L.T.zh.consumers.indexOf('消费者') === 0, '沿用「依赖 Dependencies」的写法');
+  assert.notEqual(L.T.zh.consumersNone, '无', '空清单不说光秃秃的「无」——本版是按导入符号匹配的代理');
+  assert.ok(L.T.en.consumersBlind.toLowerCase().indexOf('default') !== -1, 'default 导入的盲区明说');
+});
+
 // ---- fwdPath / feedbackPath：入边端点外移 ~8px（ADR-0009） ----
 test('forward edge lands ~8px above the target box top edge', () => {
   const a = { x: 0, y: 0 }, b = { x: 0, y: 300 };
