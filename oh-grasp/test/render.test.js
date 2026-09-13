@@ -53,7 +53,19 @@ test('render output contains client viewer markers', () => {
   const html = render(IR);
   assert.ok(html.includes('flowViewport'), 'Flow viewport marker present');
   assert.ok(html.includes('detailOverlay'), 'detail overlay marker present');
-  assert.ok(html.includes('vB-tbl'), 'Index table marker present');
+});
+
+// 票 07：文档式视图（Index）连同切换器、?variant= 参数、左右方向键、全部 .vB-* 样式一起删除。
+// 这条断言是「删干净了」的哨兵——留下任何一处残留都会把它打红。
+test('render output carries no trace of the deleted document view', () => {
+  const html = render(IR);
+  assert.ok(!html.includes('vB-'), 'no Index-view CSS/DOM markers (vB-)');
+  assert.ok(!html.toLowerCase().includes('variant'), 'no view-switching URL parameter');
+  assert.ok(!html.includes('renderB'), 'no renderB renderer');
+  assert.ok(!html.includes('VARIANTS'), 'no variant table');
+  assert.ok(!html.includes('swlabel') && !html.includes('switcher'), 'no bottom switcher DOM/CSS');
+  assert.ok(!/id="prev"/.test(html) && !/id="next"/.test(html), 'no switcher buttons');
+  assert.ok(!html.includes('ArrowLeft') && !html.includes('ArrowRight'), 'no arrow-key view switching');
 });
 
 test('render ships the ADR-0007 layout system (CSS + viewer kernel)', () => {

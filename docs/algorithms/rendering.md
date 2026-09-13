@@ -45,7 +45,6 @@ JSON 里 `<` 是合法的转义目标——`<` 与 `<` 在 JSON 语义上完全�
 | 部分 | 来源 | 说明 |
 |---|---|---|
 | CSS | render.js 内的 `CSS` 常量 | 整块内联，无外链（含 header 里的语言切换器 `.vA-lang`） |
-| 底部切换器 | 模板内联 | **待删**（ADR-0008 Q6：删 B 视图） |
 | IR | `JSON.stringify` + `<` 转义 | 放进 `<script type="application/json">` |
 | viewer | `VIEWER_SRC`（启动时 `readFileSync('viewer.js')`） | 整段内联 |
 
@@ -107,7 +106,7 @@ JSON 里 `<` 是合法的转义目标——`<` 与 `<` 在 JSON 语义上完全�
 
 **分界的边界（诚实的缺口）**：可点边、四段、消费者清单、成员直连外部、叶子依赖行的**数据与字符串**全在内核，所以「边单元长什么样、中点写什么、四段怎么分组、消费者清单有几行、反向索引折了几个」都断言得到；但「点下去真的弹出来」「Esc 真的关得掉」「hover 真的显 title」是**浏览器行为**，内核断言盖不到。这三条目前只有 scratch 冒烟脚本量过（见第 4 节），没有入库的自动缝。
 
-**位置**：viewer.js:730（分界）、viewer.js:1265（导出）。
+**位置**：viewer.js:730（分界）、viewer.js:1238（导出）。
 
 ---
 
@@ -144,13 +143,13 @@ JSON 里 `<` 是合法的转义目标——`<` 与 `<` 在 JSON 语义上完全�
 
 | 线 | 位置 | 干什么 |
 |---|---|---|
-| 入口描述（内容形状） | DOM 门内，`renderA` 里的 `detailSpec` / `groupSpec` / `portSpec` / `edgeSpec` / `consSpec`（viewer.js:1007 起） | 各产出 `{ name, kind, html, cls, mount }`：标题与 kind 是**未转义原文**，`html` 是内容，`cls` 是三档宽度（`''` / `vA-modal-wide` / `vA-modal-sm`），`mount` 是「塞进去之后才做得了的事」（子图的缩放控制器、节点选中态、网格卡片与子图节点的点击） |
-| 容器与关闭 | DOM 门内 `openModal(spec)`（viewer.js:993） | 拼唯一一份外壳（标题 / kind 标签 / `×`）、`.classList.add('open')`、**唯一一处** `#detailClose` 绑定，然后调 `spec.mount()`。四个入口因此都是**一行**：`openDetail` / `openGroup` / `openPort` / `openEdge` / `openConsumers`（viewer.js:1116–1120） |
-| 关闭槽位 | 门内的槽位（但**不在** `renderA` 内） | `closeOverlay`（viewer.js:742）由每次 `renderA` 末尾刷成新的 `closeDetail`（viewer.js:976）；`document` keydown 监听器在门的自启动 IIFE 里**只注册一次**（不像 `bindEdges` 那样每次 `renderA` 重挂），按 `Esc` 就调 `closeOverlay()`（viewer.js:1251） |
+| 入口描述（内容形状） | DOM 门内，`renderA` 里的 `detailSpec` / `groupSpec` / `portSpec` / `edgeSpec` / `consSpec`（viewer.js:1033 起） | 各产出 `{ name, kind, html, cls, mount }`：标题与 kind 是**未转义原文**，`html` 是内容，`cls` 是三档宽度（`''` / `vA-modal-wide` / `vA-modal-sm`），`mount` 是「塞进去之后才做得了的事」（子图的缩放控制器、节点选中态、网格卡片与子图节点的点击） |
+| 容器与关闭 | DOM 门内 `openModal(spec)`（viewer.js:1019） | 拼唯一一份外壳（标题 / kind 标签 / `×`）、`.classList.add('open')`、**唯一一处** `#detailClose` 绑定，然后调 `spec.mount()`。四个入口因此都是**一行**：`openDetail` / `openGroup` / `openPort` / `openEdge` / `openConsumers`（viewer.js:1142–1146） |
+| 关闭槽位 | 门内的槽位（但**不在** `renderA` 内） | `closeOverlay`（viewer.js:742）由每次 `renderA` 末尾刷成新的 `closeDetail`（viewer.js:1002）；`document` keydown 监听器在门的自启动 IIFE 里**只注册一次**（不像 `bindEdges` 那样每次 `renderA` 重挂），按 `Esc` 就调 `closeOverlay()`（viewer.js:1229） |
 
-为什么绕这么一圈：`document` 上的 keydown 不能每次重渲染都加一个（切十次语言就有十个监听器），而 `closeDetail` 又必须是最新那棵树上的函数——一个可变槽位是两头都能满足的最小写法。三条关闭路径都落在同一个 `closeDetail` 上：`×`（openModal 里那一处绑定）、点遮罩空白（viewer.js:1166，`e.target === detail`）、`Esc`（槽位）。
+为什么绕这么一圈：`document` 上的 keydown 不能每次重渲染都加一个（切十次语言就有十个监听器），而 `closeDetail` 又必须是最新那棵树上的函数——一个可变槽位是两头都能满足的最小写法。三条关闭路径都落在同一个 `closeDetail` 上：`×`（openModal 里那一处绑定）、点遮罩空白（viewer.js:1192，`e.target === detail`）、`Esc`（槽位）。
 
-**第四个入口的绑定**：`root.querySelectorAll('.vA-extcard')` → `openConsumers(id)`（viewer.js:1183）。卡片是 `<button type="button">`（可聚焦，与 `.vA-mcard` 同一个理由），`data-id` 带的是 external 模块 id；它不在画布里，所以没有拖拽阈值这回事。
+**第四个入口的绑定**：`root.querySelectorAll('.vA-extcard')` → `openConsumers(id)`（viewer.js:1209）。卡片是 `<button type="button">`（可聚焦，与 `.vA-mcard` 同一个理由），`data-id` 带的是 external 模块 id；它不在画布里，所以没有拖拽阈值这回事。
 
 **票 06 给「内容形状」加的三处**（ADR-0011 决策三，DOM 门里各只加一行，字符串全在内核）：
 
@@ -162,6 +161,6 @@ JSON 里 `<` 是合法的转义目标——`<` 与 `<` 在 JSON 语义上完全�
 
 **为什么第二段不塞进组间边**：成员吃外部依赖这件事在 `connections` 里**本来就没有**（外部依赖不进数据流边，ADR-0011 决策一），所以两个事实源分开列、谁也不冒充谁；group 的 I/O 仍只由组间边推导（ADR-0006 不破）。
 
-**拖拽阈值同样适用**：`bindEdges`（viewer.js:1125）先看 `controller.moved`（见 viewport.md 的 3px 阈值）——拖动画布时顺手扫过一条边，不该弹出四段。节点与端口上的 `click` 也照此办。
+**拖拽阈值同样适用**：`bindEdges`（viewer.js:1151）先看 `controller.moved`（见 viewport.md 的 3px 阈值）——拖动画布时顺手扫过一条边，不该弹出四段。节点与端口上的 `click` 也照此办。
 
 **本片刻意不做**（票 05 第二片）：清单行可点、一层返回栈、关闭语义随栈变化。所以现在的弹窗**没有**返回槽位，`openModal` 每次都是「替换当前内容」——点清单里的一行还是「没有下一层」这回事。

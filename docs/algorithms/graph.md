@@ -182,7 +182,7 @@ layer[v] = max(layer[v], layer[u] + 1)
 
 **关键约束**：`collapse` 只影响**分组键**，`conns` 里始终保留原始 connection。这个约束是踩坑换来的——早期版本把 `conns` 也换成折叠后的端点，导致点端口打开清单时报 `Cannot read properties of undefined`（真实模块 id 被换成了 group id，`M[id]` 取不到）。
 
-**同向自环**：折叠后 `from === to` 的边（组内边在顶层视图下）**不进顶层**，由调用方过滤（viewer.js:957，`renderA` 里折叠时就地丢掉）。
+**同向自环**：折叠后 `from === to` 的边（组内边在顶层视图下）**不进顶层**，由调用方过滤（viewer.js:974，`renderA` 里折叠时就地丢掉）。
 
 **复杂度**：O(E)。
 **位置**：viewer.js:197（`aggregateEdges`）。

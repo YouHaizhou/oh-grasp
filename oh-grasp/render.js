@@ -18,21 +18,12 @@ const CSS = `
     --accent:#6366f1; --accent-deep:#4338ca; --chip-bg:#f1f5f9; --chip-border:#e2e8f0; --canvas:#f8fafc; }
   * { box-sizing: border-box; }
   html, body { margin: 0; }
-  body { font-family: var(--sans); background: #ffffff; color: var(--text); padding-bottom: 90px; }
+  body { font-family: var(--sans); background: #ffffff; color: var(--text); }
 
-  .switcher {
-    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
-    display: flex; align-items: center; gap: 14px;
-    background: #10151c; color: #e6edf3; border: 1px solid #2a3548;
-    padding: 8px 12px; border-radius: 999px; box-shadow: 0 8px 30px rgba(0,0,0,.25);
-    z-index: 999; font-size: 13px;
-  }
-  .switcher button { width: 30px; height: 30px; border-radius: 50%; border: 1px solid #2a3548; background: #1a2230; color: #e6edf3; cursor: pointer; font-size: 15px; line-height: 1; }
-  .switcher button:hover { background: #24304a; }
-  .switcher .sw-tag { font-size: 10px; letter-spacing: .08em; color: #8b98a9; text-transform: uppercase; }
-
-  /* ===== A · Flow ===== */
-  .vA { max-width: 1060px; margin: 0 auto; padding: 40px 28px; }
+  /* ===== Flow（唯一界面） ===== */
+  /* 铺满：没有 max-width（ADR-0010 反馈 7「左右侧空白多」的根因就是它）。
+     下边距留 0：画布高正好取到「可用视口高」时，多出的下边距会把文档顶出窗口一截（出滚动条）。 */
+  .vA { padding: 40px 28px 0; }
   .vA-head { margin-bottom: 24px; }
   .vA-headrow { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
   .vA-headmain { min-width: 0; }
@@ -58,7 +49,8 @@ const CSS = `
   /* 反向索引（ADR-0011 决策三）：同一张卡片上的第二个方向——↳ 它提供哪些具名成员，← 谁在用它。 */
   .vA-extidx { display: block; font-size: 12px; color: var(--muted); font-family: var(--mono); margin-top: 4px; }
   .vA-hint { font-size: 12px; color: var(--faint); margin-bottom: 10px; }
-  .vA-flow { background: var(--canvas); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; position: relative; height: 580px; cursor: grab; user-select: none; }
+  /* 高度不写死：viewer 按 min(内容高, 视口高) 设内联 height（ADR-0010 铺满第二条）。 */
+  .vA-flow { background: var(--canvas); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; position: relative; cursor: grab; user-select: none; }
   .vA-flow.dragging { cursor: grabbing; }
   .vA-zoom { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
   .vA-src { font-family: var(--mono); font-size: 12px; line-height: 1.5; background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 12px 14px; overflow-x: auto; margin: 0 0 16px; white-space: pre; }
@@ -109,28 +101,6 @@ const CSS = `
   .vA-fp-cap { flex: 0 0 52px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); padding-top: 1px; }
   .vA-fp-txt { flex: 1; color: var(--muted); }
   .vA-fp-none { color: var(--faint); }
-
-  /* ===== B · Index ===== */
-  .vB { max-width: 960px; margin: 0 auto; padding: 48px 32px; }
-  .vB-head { border-bottom: 1px solid var(--border); padding-bottom: 24px; margin-bottom: 32px; }
-  .vB-title { font-family: var(--mono); font-size: 28px; font-weight: 700; margin: 0 0 8px; }
-  .vB-sub { font-size: 16px; color: var(--muted); margin: 0 0 20px; }
-  .vB-io { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-  .vB-io dt { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); margin-bottom: 6px; }
-  .vB-io dd { margin: 0; font-size: 14px; color: var(--text); }
-  .vB h2 { font-size: 14px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin: 0 0 16px; }
-  .vB h2 span { color: var(--faint); font-weight: 400; }
-  .vB-ext { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; margin-bottom: 40px; }
-  .vB-extcard { border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
-  .vB-extname { font-family: var(--mono); font-size: 15px; font-weight: 600; }
-  .vB-extdesc { font-size: 13px; color: var(--muted); margin: 4px 0 12px; }
-  .vB-extuse { font-size: 12px; color: var(--accent-deep); font-family: var(--mono); }
-  .vB-tbl { width: 100%; border-collapse: collapse; }
-  .vB-tbl th { text-align: left; font-size: 12px; color: var(--faint); font-weight: 500; padding: 0 0 10px; border-bottom: 1px solid var(--border); }
-  .vB-tbl td { padding: 14px 0; border-bottom: 1px solid #f0f2f5; vertical-align: top; font-size: 14px; }
-  .vB-tbl td.m { font-family: var(--mono); font-weight: 600; }
-  .vB-tbl td.d { color: var(--muted); }
-  .vB-flow { font-family: var(--mono); font-size: 13px; color: var(--accent-deep); white-space: nowrap; }
 `;
 
 function render(ir) {
@@ -147,13 +117,6 @@ function render(ir) {
 </head>
 <body>
 <div id="root"></div>
-
-<div class="switcher">
-  <button id="prev" aria-label="上一个">←</button>
-  <span class="sw-tag">oh-grasp</span>
-  <span id="swlabel">A — Flow · 数据流图</span>
-  <button id="next" aria-label="下一个">→</button>
-</div>
 
 <script type="application/json" id="oh-grasp-ir">${json}</script>
 <script>${VIEWER_SRC}</script>

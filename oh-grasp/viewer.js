@@ -864,16 +864,33 @@
       active = null;
     }
   });
-  function attachFlow(vp, zt, W, H, badge) {
+  // 「适应」的放大上限（ADR-0010 铺满第三条）：原来 min(1, …) 只在缩小方向工作，小图永远不放大填满。
+  // 取 1.5：两个方向都能填满，又不至于把字放大到粗糙（viewer 里唯一的放大系数，滚轮钳制不在此列）。
+  var FIT_MAX = 1.5;
+  // 画布高度的下限（同 ADR-0010 铺满第二条的兜底）：窗口比页面头部还矮时「可用视口高」会算成 0 或负数，
+  // 没有下限就把整张图缩进 1px 的条里（换来的下限值 = 弹窗子图的高度，够看清一层）。
+  var MIN_CANVAS_H = 320;
+  // availH：调用方给的「画布可以占多高」（顶层的视口高）。传了它，fit 就反过来用算出的缩放回填画布高
+  // ——高度 = min(渲染后的内容高, 视口高)；不传（弹窗子图）则维持原样：画布高由 CSS 定死，fit 读它。
+  function attachFlow(vp, zt, W, H, badge, availH) {
     var c = { scale: 1, tx: 0, ty: 0, moved: false, dragging: false, sx: 0, sy: 0, ox: 0, oy: 0, vp: vp };
     c.apply = function () {
       zt.style.transform = 'translate(' + c.tx + 'px,' + c.ty + 'px) scale(' + c.scale + ')';
       if (badge) badge.textContent = Math.round(c.scale * 100) + '%';
     };
     c.fit = function () {
-      var vw = vp.clientWidth || 900, vh = vp.clientHeight || 560;
-      var s = Math.min(1, vw / W, vh / H);
+      // vh 是「可用的视口高」，不是画布当前高：画布高是这次 fit 的**结果**，读它自己就绕回去了。
+      var vw = vp.clientWidth || 900;
+      var vh = availH || vp.clientHeight || 560;
+      var s = Math.min(FIT_MAX, vw / W, vh / H);
       c.scale = s;
+      if (availH) {
+        // 画布高 = min(内容高, 视口高)：缩放定了才知道内容渲染后多高（这一行同时把 vh 换成画布高，
+        // 下面按它居中，短内容因此 ty = 0 不再有上下空带）。裁切保护来自上面一行的 s ≤ vh/H——它已经
+        // 保证 H·s ≤ vh，所以这个 min 的第二个参数按构造不会被选中，写出来是让规则显式。
+        vh = Math.min(H * s, vh);
+        vp.style.height = Math.round(vh) + 'px';
+      }
       c.tx = (vw - W * s) / 2;
       c.ty = (vh - H * s) / 2;
       c.apply();
@@ -901,7 +918,7 @@
     return c;
   }
 
-  /* ============ A · Flow ============ */
+  /* ============ Flow（唯一界面） ============ */
   function renderA(root) {
     var lang = state.lang;
     var io = function (arr) { return pickList(arr, lang).map(function (t) { return '<span class="chip">' + esc(t) + '</span>'; }).join(''); };
@@ -971,7 +988,16 @@
 
     var detail = root.querySelector('#detailOverlay');
     var zt = root.querySelector('#zoomTarget'), zb = root.querySelector('#zoomBadge');
-    var ctl = attachFlow(root.querySelector('#flowViewport'), zt, flow.W, flow.H, zb);
+    var vpEl = root.querySelector('#flowViewport');
+    // 画布高度 = min(内容高度, 视口高度)（ADR-0010 铺满第二条）：内容矮时贴合内容不留空带，
+    // 内容高时保持视口高（取纯内容高则内容全在页面上，拖拽/缩放就没了意义）。原 CSS 写死的 580px 由这条接手。
+    // 「视口高」= 窗口高 − 画布顶端到视口顶的距离（页面已上滚时退回整窗高）。这里只交**可用高**，
+    // 画布最终多高由 attachFlow 定完缩放后回填——它得先知道能占多高，才能算出该放大还是缩小。
+    var winH = (typeof window !== 'undefined' && window.innerHeight) || 560;
+    var top = vpEl.getBoundingClientRect().top || 0;
+    var availH = top > 0 ? winH - top : winH;
+    if (!(availH >= MIN_CANVAS_H)) availH = MIN_CANVAS_H; // 画布顶已在视口外（窗口比 header 矮）
+    var ctl = attachFlow(vpEl, zt, flow.W, flow.H, zb, availH);
 
     function closeDetail() {
       detail.classList.remove('open');
@@ -1189,73 +1215,20 @@
     closeOverlay = closeDetail;
   }
 
-  /* ============ B · Index ============ */
-  function renderB(root) {
-    var ext = ir.modules.filter(function (m) { return m.type === 'external'; });
-    var intl = ir.modules.filter(function (m) { return m.type === 'internal'; });
-    var ioIn = (ir.meta.input || []).join(' · ') || '—';
-    var ioOut = (ir.meta.output || []).join(' · ') || '—';
-    var extCards = ext.map(function (m) {
-      return '<div class="vB-extcard"><div class="vB-extname">' + esc(m.label) + '</div>' +
-        '<div class="vB-extdesc">' + esc(m.description) + '</div>' +
-        '<div class="vB-extuse">↳ ' + esc((m.input || []).join(', ')) + '</div></div>';
-    }).join('');
-    function flowText(m) {
-      var inc = ir.connections.filter(function (c) { return c.to === m.id; });
-      var out = ir.connections.filter(function (c) { return c.from === m.id; });
-      var incS = inc.map(function (c) { return '← ' + c.label + ' (' + M[c.from].label + ')'; }).join(' ');
-      var outS = out.map(function (c) { return c.label + ' → ' + M[c.to].label; }).join(' ');
-      return [incS, outS].filter(Boolean).join('　') || '—';
-    }
-    var rows = intl.map(function (m) {
-      return '<tr><td class="m">' + esc(m.label) + '</td><td class="d">' + esc(m.description) + '</td><td class="vB-flow">' + esc(flowText(m)) + '</td></tr>';
-    }).join('');
-    root.innerHTML =
-      '<div class="vB">' +
-      '<header class="vB-head"><h1 class="vB-title">' + esc(ir.meta.title) + '</h1><p class="vB-sub">' + esc(ir.meta.subtitle) + '</p>' +
-      '<dl class="vB-io"><div><dt>输入 Input</dt><dd>' + esc(ioIn) + '</dd></div><div><dt>输出 Output</dt><dd>' + esc(ioOut) + '</dd></div></dl></header>' +
-      '<h2>外部依赖 <span>' + ext.length + '</span></h2><div class="vB-ext">' + (extCards || '<div class="vA-empty">无</div>') + '</div>' +
-      '<h2>内部模块 <span>' + intl.length + '</span></h2>' +
-      '<table class="vB-tbl"><thead><tr><th>模块</th><th>职责</th><th>数据流</th></tr></thead><tbody>' + rows + '</tbody></table>' +
-      '</div>';
-  }
-
-  /* ============ 切换器 ============ */
-  var VARIANTS = [
-    { key: 'A', name: 'Flow · 数据流图' },
-    { key: 'B', name: 'Index · 文档式' }
-  ];
-  function currentKey() { var m = location.search.match(/variant=([AB])/i); return m ? m[1].toUpperCase() : 'A'; }
+  /* ============ 渲染入口 ============ */
+  // 只有一个界面（ADR-0010）：文档式视图、切换器、URL 里的视图参数、左右方向键全部删除。
+  // 旧链接带回的查询串一律忽略——落回唯一视图，不报错也不空白。
   function render() {
     active = null;
-    var k = currentKey();
     var root = document.getElementById('root');
     root.innerHTML = '';
-    if (k === 'A') renderA(root); else renderB(root);
-    var v = VARIANTS.filter(function (x) { return x.key === k; })[0];
-    document.getElementById('swlabel').textContent = k + ' — ' + (v ? v.name : '');
+    renderA(root);
   }
-  function step(d) {
-    var k = currentKey();
-    var i = 0;
-    VARIANTS.forEach(function (x, idx) { if (x.key === k) i = idx; });
-    var n = VARIANTS[(i + d + VARIANTS.length) % VARIANTS.length].key;
-    history.replaceState(null, '', '?variant=' + n);
-    render();
-  }
-      document.getElementById('prev').addEventListener('click', function () { step(-1); });
-      document.getElementById('next').addEventListener('click', function () { step(1); });
       document.addEventListener('keydown', function (e) {
         // Esc 关弹窗（ADR-0010）：原来只有「点 ×」和「点遮罩空白」，键盘用户被困在弹窗里。
-        // 放在输入框判断之前——弹窗里没有输入框，而 Esc 在任何焦点下都该能退出。
         if (e.key === 'Escape' || e.key === 'Esc') {
           if (closeOverlay) closeOverlay();
-          return;
         }
-        var t = e.target;
-        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-        if (e.key === 'ArrowLeft') step(-1);
-        if (e.key === 'ArrowRight') step(1);
       });
       render();
     })();
