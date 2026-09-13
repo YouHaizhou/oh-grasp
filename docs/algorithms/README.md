@@ -51,20 +51,21 @@
 | 21 | 光标锚定滚轮缩放 | 视图 | viewer.js:1025 |
 | 22 | 拖拽平移 + 3px 点击阈值 | 视图 | viewer.js:983 |
 | 23 | 双击 fit（含缩放钳制） | 视图 | viewer.js:1043 |
-| 24 | 引用完整性检查 | 校验 | validate.js:221 |
-| 25 | 词边界正则存在性检查 | 校验 | validate.js:280 |
-| 26 | 空白归一化子串匹配 | 校验 | validate.js:288 |
+| 24 | 引用完整性检查 | 校验 | validate.js:231 |
+| 25 | 词边界正则存在性检查 | 校验 | validate.js:285 |
+| 26 | 空白归一化子串匹配 | 校验 | validate.js:293 |
 | 27 | HTML 转义 + JSON 内联转义 | 渲染 | render.js:131 / viewer.js:9 |
 | 28 | 双语取值 `pick` / `pickList` | 渲染 | viewer.js:71 |
 | 29 | UI 文案表 `T` + `tr` / `fmt` | 渲染 | viewer.js:86 |
 | 30 | 端口清单去重（行数 = 内容种数） | 图 | viewer.js:545 |
 | 31 | 可点边单元（加宽命中路径 + `<title>` hover 提示） | 几何 | viewer.js:825 / viewer.js:782 |
 | 32 | 四段说明清单（按来源模块分组 + 缺段显式「—」） | 图 | viewer.js:739 |
-| 33 | 四段说明校验（语言在外、四格在内） | 校验 | validate.js:31 |
+| 33 | 四段说明校验（语言在外、四格在内，双语必填） | 校验 | validate.js:29 |
 | 34 | 消费者清单 / 反向索引（数据源 = `module.uses`，宽面 cap 3） | 图 | viewer.js:604 / viewer.js:620 |
-| 35 | `uses` 外键完整性（必须指向存在的 external） | 校验 | validate.js:178 |
-| 36 | `runtime` 属性路径正则（拒括号与裸全局） | 校验 | validate.js:194 |
+| 35 | `uses` 外键完整性（必须指向存在的 external） | 校验 | validate.js:185 |
+| 36 | `runtime` 属性路径正则（拒括号与裸全局） | 校验 | validate.js:201 |
 | 37 | 自适应画布（fit 允许放大 + 画布高 = min(内容高, 视口高)） | 视图 | viewer.js:1008 / viewer.js:1123 |
+| 38 | 双语必填校验（可译字段缺 zh 或 en 即报错） | 校验 | validate.js:15 |
 
 ## 待实现
 
@@ -75,10 +76,10 @@
 （**虚节点正交路由**已落地，见 `geometry.md` §1 与 `graph.md` §2/§3：跨度 ≥2 的前向边逐层穿盒间空隙，虚节点进层内序列参与 barycenter、但不渲染形状——ADR-0009。）
 （**双语切换**已落地，见 `rendering.md` §3：`pick` 取值 + viewer 内 `T` 文案表 + header 切换器。）
 （**端点外移**已落地，见 `geometry.md` §1/§2：入边终点抬到目标盒上边缘上方 `PORT_GAP = 8` px。）
-（**可点边 + 四段说明**已落地，见 `rendering.md` §3/§5、`graph.md` §10、`validation.md` §5：一条边是一个 `<g class="edge">`（加宽命中路径 + `<title>`），点开弹四段；`connection.description` 此刻是**可选**字段，`generated/` 里那份产物还没有它——「每条 connection 四段齐全」是契约步的事。）
+（**可点边 + 四段说明**已落地，见 `rendering.md` §3/§5、`graph.md` §10、`validation.md` §5：一条边是一个 `<g class="edge">`（加宽命中路径 + `<title>`），点开弹四段；`connection.description` 已是**必填**字段——四段 × 中英两套，缺一格硬报错（契约步已落地）。`generated/` 里那份产物还没有它，重新生成时补上。）
 （**一个弹窗 + 四入口 + 消费者清单**已落地，见 `rendering.md` §3/§5：四个入口共用 `openModal` 一个容器与一条关闭路径，「点依赖卡片 → 消费者清单」是第四个入口；消费者行数据/行 HTML 在内核（`consRows` / `consListHtml`）。）
 （**自适应画布**已落地，见 `viewport.md` §3：`fit` 的常数 1 换成 `FIT_MAX = 1.5`（原来只在缩小方向工作），顶层画布高由 fit 回填成 `min(内容高, 视口高)`、宽度上限 `max-width` 已删；同一批还删掉了文档式视图与底部切换器，界面只剩一个。）
-（**外部依赖可追踪**已落地，见 `rendering.md` §3/§5 与 `validation.md` §1：internal 模块上的 `uses`（消费了哪些 external）与 `runtime`（宿主运行时调用，只写属性路径）由 validate 硬校验；显示在三处——group 弹窗第二段「成员直连外部」（`extUseHtml`）、叶子弹窗的依赖行（`depsHtml`）、侧栏依赖卡片的**反向索引**（`consIndex`，前 3 个 + `+M`）。消费者清单的数据源**就是 `uses`**：票 05 那版「具名导入符号匹配」的代理估算连同它的盲区（default 导入恒 0 行）已删除——见 `rendering.md` §3 的历史说明。`generated/` 里那份产物还没有这两个字段，填准它们是重新生成时的事。）
+（**外部依赖可追踪**已落地，见 `rendering.md` §3/§5 与 `validation.md` §1：internal 模块上的 `uses`（消费了哪些 external）与 `runtime`（宿主运行时调用，只写属性路径）由 validate 硬校验；显示在三处——group 弹窗第二段「成员直连外部」（`extUseHtml`）、叶子弹窗的依赖行（`depsHtml`）、侧栏依赖卡片的**反向索引**（`consIndex`，前 3 个 + `+M`）。消费者清单的数据源**就是 `uses`**：票 05 那版「具名导入符号匹配」的代理估算连同它的盲区（default 导入恒 0 行）已删除——见 `rendering.md` §3 的历史说明。`generated/` 里那份产物还没有这两个字段，填准它们是重新生成时的事。三件事（双语、四段、`uses`/`runtime`）同批补——**在那之前它过不了校验**，这是 ADR-0008 写明的预期，不是回归。）
 （**行号**：本表随改动重核过一轮；此后若代码再变，照 ADR-0012 以**函数名**为准。）
 
 ## 已知的复杂度隐患

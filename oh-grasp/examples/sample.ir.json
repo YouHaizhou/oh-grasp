@@ -1,20 +1,83 @@
 {
   "meta": {
     "title": "sample.js",
-    "subtitle": "读取并解析 JSON 配置，按配置处理记录并建立索引。",
-    "input": ["config 文件路径", "records 数组"],
-    "output": ["处理后的记录", "按 id 建立的索引"]
+    "subtitle": {
+      "zh": "读取并解析 JSON 配置，按配置处理记录并建立索引。",
+      "en": "Reads and parses a JSON config, then processes records and builds an index."
+    },
+    "input": [
+      { "zh": "config 文件的路径", "en": "the path to the config file" },
+      { "zh": "records 数组", "en": "the records array" }
+    ],
+    "output": [
+      { "zh": "处理后的记录", "en": "the processed records" },
+      { "zh": "按 id 建立的索引", "en": "an index keyed by id" }
+    ]
   },
   "modules": [
-    { "id": "ext_fs", "label": "fs", "type": "external", "description": "读取配置文件", "input": ["readFileSync"] },
-    { "id": "read_config", "label": "readConfig", "type": "internal", "description": "读文件并交给解析", "detail": "读取指定路径的配置文件，用 fs.readFileSync 同步读取整个文件为 UTF-8 字符串，再原样交给 parseConfig 解析。此处不做任何校验或转换。", "source": "function readConfig(path) {\n  const raw = fs.readFileSync(path, 'utf8');\n  return parseConfig(raw);\n}" },
-    { "id": "parse_config", "label": "parseConfig", "type": "internal", "description": "把原始文本解析成对象", "detail": "接收 readConfig 传来的原始文本，调用 JSON.parse 解析为配置对象。解析失败时异常会向上抛出，由调用方决定如何处理。", "source": "function parseConfig(raw) {\n  return JSON.parse(raw);\n}" },
-    { "id": "process_records", "label": "processRecords", "type": "internal", "description": "按配置为每条记录打上 source", "detail": "遍历 records 数组，为每条记录展开并附加 config.source 字段，生成带来源标记的新记录，供后续按来源追踪或过滤。", "source": "function processRecords(records, config) {\n  return records.map(r => ({\n    ...r,\n    source: config.source,\n  }));\n}" },
-    { "id": "build_index", "label": "buildIndex", "type": "internal", "description": "按 id 建立记录索引", "detail": "接收处理后的记录数组，以每条记录的 id 为键、记录本身为值，用 Object.fromEntries 构建查找索引，供按 id 快速取用。", "source": "function buildIndex(records) {\n  return Object.fromEntries(records.map(r => [r.id, r]));\n}" }
+    { "id": "ext_fs", "label": "fs", "type": "external", "description": { "zh": "读取配置文件", "en": "Reads the config file" }, "input": ["readFileSync"] },
+    { "id": "read_config", "label": "readConfig", "type": "internal", "description": { "zh": "读文件并交给解析", "en": "Reads the file and hands it to the parser" }, "detail": { "zh": "读取指定路径的配置文件，用 fs.readFileSync 同步读取整个文件为 UTF-8 字符串，再原样交给 parseConfig 解析。此处不做任何校验或转换。", "en": "Reads the config file at the given path, reading the whole file synchronously as a UTF-8 string with fs.readFileSync, then hands it to parseConfig unchanged. No validation or conversion happens here." }, "source": "function readConfig(path) {\n  const raw = fs.readFileSync(path, 'utf8');\n  return parseConfig(raw);\n}" },
+    { "id": "parse_config", "label": "parseConfig", "type": "internal", "description": { "zh": "把原始文本解析成对象", "en": "Parses the raw text into an object" }, "detail": { "zh": "接收 readConfig 传来的原始文本，调用 JSON.parse 解析为配置对象。解析失败时异常会向上抛出，由调用方决定如何处理。", "en": "Takes the raw text from readConfig and parses it into a config object with JSON.parse. A parse failure propagates up to the caller." }, "source": "function parseConfig(raw) {\n  return JSON.parse(raw);\n}" },
+    { "id": "process_records", "label": "processRecords", "type": "internal", "description": { "zh": "按配置为每条记录打上 source", "en": "Tags every record with its source from the config" }, "detail": { "zh": "遍历 records 数组，为每条记录展开并附加 config.source 字段，生成带来源标记的新记录，供后续按来源追踪或过滤。", "en": "Walks the records array, spreading each record and adding a config.source field, producing records that can later be traced or filtered by source." }, "source": "function processRecords(records, config) {\n  return records.map(r => ({\n    ...r,\n    source: config.source,\n  }));\n}" },
+    { "id": "build_index", "label": "buildIndex", "type": "internal", "description": { "zh": "按 id 建立记录索引", "en": "Builds an index of records keyed by id" }, "detail": { "zh": "接收处理后的记录数组，以每条记录的 id 为键、记录本身为值，用 Object.fromEntries 构建查找索引，供按 id 快速取用。", "en": "Takes the processed records and builds a lookup index with Object.fromEntries, keyed by each record's id, so a record can be fetched by id." }, "source": "function buildIndex(records) {\n  return Object.fromEntries(records.map(r => [r.id, r]));\n}" }
   ],
   "connections": [
-    { "from": "read_config", "to": "parse_config", "label": "raw" },
-    { "from": "parse_config", "to": "process_records", "label": "config" },
-    { "from": "process_records", "to": "build_index", "label": "records" }
+    {
+      "from": "read_config",
+      "to": "parse_config",
+      "label": { "zh": "传入配置原文", "en": "pass the raw config text" },
+      "description": {
+        "zh": {
+          "source": "config 路径指向的那个文件，刚被整份读进内存。",
+          "process": "readConfig 用 fs.readFileSync 按 UTF-8 同步读，不做校验也不做转换。",
+          "output": "一份与磁盘逐字相同的配置文本。",
+          "purpose": "交给 parseConfig 解析成内部使用的配置对象。"
+        },
+        "en": {
+          "source": "The file the config path points at, freshly read into memory.",
+          "process": "readConfig reads it synchronously as UTF-8 with fs.readFileSync: no validation, no conversion.",
+          "output": "The config text, character for character as it sits on disk.",
+          "purpose": "Handed to parseConfig to become the config object used internally."
+        }
+      }
+    },
+    {
+      "from": "parse_config",
+      "to": "process_records",
+      "label": { "zh": "传入解析后的配置", "en": "pass the parsed config" },
+      "description": {
+        "zh": {
+          "source": "parseConfig 用 JSON.parse 解析出的配置对象。",
+          "process": "原样传出，不做任何加工或补全。",
+          "output": "一个完整的配置对象，字段与 JSON 里写的一致。",
+          "purpose": "让 processRecords 按 config.source 为每条记录打上来源标记。"
+        },
+        "en": {
+          "source": "The config object parseConfig produced with JSON.parse.",
+          "process": "Passed straight through, with nothing added or filled in.",
+          "output": "A complete config object whose fields match the JSON.",
+          "purpose": "So processRecords can tag every record with config.source."
+        }
+      }
+    },
+    {
+      "from": "process_records",
+      "to": "build_index",
+      "label": { "zh": "传入带来源的记录", "en": "pass the source-tagged records" },
+      "description": {
+        "zh": {
+          "source": "processRecords 展开后的记录数组，每条都带了 config.source。",
+          "process": "按原顺序整批传出，不再过滤或排序。",
+          "output": "一串带来源标记的记录。",
+          "purpose": "让 buildIndex 以每条记录的 id 为键建索引，供按 id 取用。"
+        },
+        "en": {
+          "source": "The record array processRecords spread out, each with config.source attached.",
+          "process": "Handed over as a whole batch, in its original order, unfiltered and unsorted.",
+          "output": "Records that each carry their source tag.",
+          "purpose": "So buildIndex can key them by id for later lookup."
+        }
+      }
+    }
   ]
 }

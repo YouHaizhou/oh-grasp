@@ -3,20 +3,30 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { validate } = require('../validate.js');
 
+// 基座 fixture：**双语齐全**（契约步起，任何一处缺一种语言都会让约 50 条测试一起变红——
+// 那是预期行为，不是各自的回归）。改这里等于改所有派生 fixture，包括 validGroupedIR。
 function validIR() {
   return {
     meta: {
       title: 'parser.js',
-      subtitle: 'Parses config and processes records.',
-      input: ['config.json'],
-      output: ['records'],
+      subtitle: { zh: '解析配置并处理记录。', en: 'Parses config and processes records.' },
+      input: [{ zh: '配置路径', en: 'config path' }],
+      output: [{ zh: '记录', en: 'records' }],
     },
     modules: [
-      { id: 'ext_fs', label: 'fs', type: 'external', description: 'Node filesystem', input: ['readFileSync'] },
-      { id: 'parse', label: 'parseConfig', type: 'internal', description: 'Parses raw config into an object', detail: 'Parses raw config text into an object.', source: 'function parseConfig(raw) {\n  return JSON.parse(raw);\n}' },
-      { id: 'proc', label: 'processRecords', type: 'internal', description: 'Transforms records', detail: 'Transforms records.', source: 'function processRecords() {}' },
+      { id: 'ext_fs', label: 'fs', type: 'external', description: { zh: 'Node 文件系统', en: 'Node filesystem' }, input: ['readFileSync'] },
+      { id: 'parse', label: 'parseConfig', type: 'internal', description: { zh: '把原始配置解析成对象', en: 'Parses raw config into an object' }, detail: { zh: '把原始配置文本解析成对象。', en: 'Parses raw config text into an object.' }, source: 'function parseConfig(raw) {\n  return JSON.parse(raw);\n}' },
+      { id: 'proc', label: 'processRecords', type: 'internal', description: { zh: '转换记录', en: 'Transforms records' }, detail: { zh: '转换记录。', en: 'Transforms records.' }, source: 'function processRecords() {}' },
     ],
-    connections: [{ from: 'parse', to: 'proc', label: 'config' }],
+    connections: [{
+      from: 'parse',
+      to: 'proc',
+      label: { zh: '传入配置对象', en: 'pass the config object' },
+      description: {
+        zh: { source: '解析出的配置对象。', process: '原样传出。', output: '一个配置对象。', purpose: '供 processRecords 读 config.source。' },
+        en: { source: 'The parsed config object.', process: 'Passed straight through.', output: 'A config object.', purpose: 'So processRecords can read config.source.' },
+      },
+    }],
   };
 }
 
@@ -149,14 +159,14 @@ test('external module does not require detail or source', () => {
 
 test('connection with dangling from fails', () => {
   const ir = validIR();
-  ir.connections.push({ from: 'nope', to: 'proc', label: 'x' });
+  ir.connections.push({ from: 'nope', to: 'proc', label: { zh: '悬空', en: 'dangling' }, description: { zh: four('zh'), en: four('en') } });
   const r = validate(ir);
   assert.ok(r.errors.some((e) => e.path === 'connections[1].from'));
 });
 
 test('connection to external module fails', () => {
   const ir = validIR();
-  ir.connections.push({ from: 'parse', to: 'ext_fs', label: 'x' });
+  ir.connections.push({ from: 'parse', to: 'ext_fs', label: { zh: '指向外部', en: 'to external' }, description: { zh: four('zh'), en: four('en') } });
   const r = validate(ir);
   assert.ok(r.errors.some((e) => e.path === 'connections[1].to'));
 });
@@ -223,7 +233,7 @@ test('sourceLine optional when omitted', () => {
 function validGroupedIR() {
   const ir = validIR();
   ir.groups = [
-    { id: 'grp_core', label: '核心处理', description: '解析并处理记录' },
+    { id: 'grp_core', label: { zh: '核心处理', en: 'Core processing' }, description: { zh: '解析并处理记录。', en: 'Parses and processes records.' } },
   ];
   ir.modules[1].group = 'grp_core';
   ir.modules[2].group = 'grp_core';
@@ -257,14 +267,14 @@ test('group missing description fails', () => {
 
 test('duplicate group id fails', () => {
   const ir = validGroupedIR();
-  ir.groups.push({ id: 'grp_core', label: '另一个', description: 'x' });
+  ir.groups.push({ id: 'grp_core', label: { zh: '另一个', en: 'another' }, description: { zh: '另一个分组。', en: 'Another group.' } });
   const r = validate(ir);
   assert.ok(r.errors.some((e) => e.path === 'groups[1].id'));
 });
 
 test('group with fewer than 2 members fails', () => {
   const ir = validIR();
-  ir.groups = [{ id: 'grp_x', label: 'X', description: 'x' }];
+  ir.groups = [{ id: 'grp_x', label: { zh: 'X', en: 'X' }, description: { zh: '只有一个成员。', en: 'Only one member.' } }];
   ir.modules[1].group = 'grp_x';
   const r = validate(ir);
   assert.ok(r.errors.some((e) => e.path === 'groups[0]'));
@@ -296,7 +306,7 @@ test('removed group summary fields are tolerated (backward compat)', () => {
 
 test('ungrouped leaf alongside grouped modules passes', () => {
   const ir = validGroupedIR();
-  ir.modules.push({ id: 'util', label: 'helper', type: 'internal', description: 'Utility', detail: 'Utility.', source: 'function helper() {}' });
+  ir.modules.push({ id: 'util', label: 'helper', type: 'internal', description: { zh: '工具函数', en: 'Utility' }, detail: { zh: '工具函数。', en: 'Utility.' }, source: 'function helper() {}' });
   const r = validate(ir);
   assert.equal(r.ok, true);
 });
@@ -313,8 +323,9 @@ test('groups not an array fails', () => {
   assert.ok(r.errors.some((e) => e.path === 'groups'));
 });
 
-// === 双语（expand 步：新旧两种形态都收，不做「两种语言都必填」的收紧） ===
+// === 双语（契约步：可译字段一律 {zh, en} 且两边都必填，单语产物硬报错） ===
 const BI_IR = require('../examples/sample.bilingual.ir.json');
+const MIN_IR = require('../examples/sample.ir.json');
 
 test('bilingual IR passes validation', () => {
   const r = validate(BI_IR);
@@ -338,10 +349,34 @@ test('every connection of the bilingual fixture carries the four segments in bot
   });
 });
 
-test('monolingual IR keeps passing next to the bilingual one', () => {
-  // 旧产物（散文字段全是普通字符串）不受影响 —— expand 步的兼容保证。
-  const r = validate(validIR());
-  assert.equal(r.ok, true);
+test('the minimal sample fixture is bilingual too', () => {
+  // 全仓唯一的**最小形状** fixture（5 modules / 3 connections / 0 groups）——
+  // 它和带 group 的那份分工是「最小 / 带 group」，两份都必须过收紧后的校验。
+  assert.equal(MIN_IR.groups, undefined, '这份 fixture 的职责就是零 group');
+  const r = validate(MIN_IR);
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+});
+
+test('a monolingual IR now fails: every prose field needs both languages (contract step)', () => {
+  // 旧形态（散文字段全是普通字符串）在契约步起硬报错——普通字符串缺了一整种语言。
+  // 静默回退会让中英混杂原样回来，那正是最初的病根（ADR-0008）。
+  const ir = validIR();
+  ir.meta.subtitle = 'Parses config and processes records.';
+  ir.meta.input = ['config.json'];
+  ir.meta.output = ['records'];
+  ir.modules[0].description = 'Node filesystem';
+  ir.modules[1].description = 'Parses raw config into an object';
+  ir.modules[1].detail = 'Parses raw config text into an object.';
+  ir.modules[2].description = 'Transforms records';
+  ir.modules[2].detail = 'Transforms records.';
+  ir.connections[0].label = 'config';
+  const r = validate(ir);
+  assert.equal(r.ok, false);
+  for (const p of ['meta.subtitle', 'meta.input', 'meta.output',
+    'modules[0].description', 'modules[1].description', 'modules[1].detail',
+    'modules[2].description', 'modules[2].detail', 'connections[0].label']) {
+    assert.ok(r.errors.some((e) => e.path === p), `缺 ${p} 的报错：` + JSON.stringify(r.errors));
+  }
 });
 
 test('every prose field accepts {zh,en}', () => {
@@ -359,12 +394,14 @@ test('every prose field accepts {zh,en}', () => {
   assert.deepEqual(r.errors, []);
 });
 
-test('a prose field with only one language is tolerated (tightening is the contract step)', () => {
+test('a prose field with only one language now fails with a precise path (contract step)', () => {
   const ir = validIR();
   ir.meta.subtitle = { zh: '只有中文' };
   ir.modules[1].description = { en: 'english only' };
   const r = validate(ir);
-  assert.equal(r.ok, true);
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => e.path === 'meta.subtitle'), JSON.stringify(r.errors));
+  assert.ok(r.errors.some((e) => e.path === 'modules[1].description'), JSON.stringify(r.errors));
 });
 
 test('an empty prose object fails with a precise path', () => {
@@ -387,15 +424,18 @@ test('non-prose items in meta.input still have to be strings or {zh,en}', () => 
   assert.ok(r.errors.some((e) => e.path === 'meta.input'));
 });
 
-test('meta.input accepts a plain string item even when empty (expand step does not tighten)', () => {
-  // 数组项走的是比标量字段更宽的判据：旧 isStrArray 对普通字符串一律放行，空串也放行。
-  // 一旦顺手改用 isTranslatable，校验就被悄悄收紧了——这条把那个边界钉住。
+test('meta.input rejects a plain string item: every item must be bilingual (contract step)', () => {
+  // 数组项与标量字段现在同一把尺子——普通字符串（含空串）缺了一整种语言，硬报错。
   const ir = validIR();
   ir.meta.input = ['', 'ok'];
-  assert.ok(validate(ir).ok);
-  // 但空的 {zh,en} 对象项仍然拒——宽容只给旧形态的普通字符串。
+  assert.equal(validate(ir).ok, false);
+  assert.ok(validate(ir).errors.some((e) => e.path === 'meta.input'));
+  // 空的 {zh,en} 项同样拒。
   ir.meta.input = [{}];
   assert.ok(validate(ir).errors.some((e) => e.path === 'meta.input'));
+  // 双语齐全的项放行。
+  ir.meta.input = [{ zh: '配置路径', en: 'config path' }];
+  assert.equal(validate(ir).ok, true, JSON.stringify(validate(ir).errors));
 });
 
 test('module labels stay string-only: names are never translated', () => {
@@ -433,12 +473,27 @@ test('connection description with all four segments in both languages passes', (
   assert.deepEqual(r.errors, []);
 });
 
-test('a connection without description still passes (expand step, not the contract step)', () => {
-  // 硬要求（每条 connection 都必须有四段）是契约步的 AC；本步只收「存在时必须完整」。
+test('a connection without description now fails with the exact path (contract step)', () => {
+  // 契约步的硬要求：每条 connection 都必须有四段。缺席不再是「没写」而是「不完整」。
   const ir = validIR();
-  assert.ok(!('description' in ir.connections[0]));
+  delete ir.connections[0].description;
   const r = validate(ir);
-  assert.equal(r.ok, true);
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => e.path === 'connections[0].description'),
+    '错误 path 要指到缺 description 的那条边：' + JSON.stringify(r.errors));
+  // 缺席走「必填」那条消息，不走「形状不对」——形状消息会把人引去改「写了但写歪」的情况，
+  // 而这里的问题是根本没写。四段说明只能靠报错定位，消息说歪了模型就只能猜（见 validation.md §5）。
+  assert.ok(r.errors.some((e) => e.path === 'connections[0].description' && /is required/.test(e.message)),
+    '缺席要走「必填」那条消息：' + JSON.stringify(r.errors));
+});
+
+test('a connection with a null description also reports it as required', () => {
+  const ir = validIR();
+  ir.connections[0].description = null;
+  const r = validate(ir);
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => e.path === 'connections[0].description' && /is required/.test(e.message)),
+    JSON.stringify(r.errors));
 });
 
 test('connection description missing one segment fails with the exact path', () => {
@@ -486,11 +541,13 @@ test('a description language subtree that is not an object fails at the language
   assert.ok(r.errors.some((e) => e.path === 'connections[0].description.zh'));
 });
 
-test('one complete language subtree is tolerated (bilingual-required is the contract step)', () => {
+test('one complete language subtree now fails at the missing language (contract step)', () => {
   const ir = validIR();
   ir.connections[0].description = { zh: four('zh') };
   const r = validate(ir);
-  assert.equal(r.ok, true);
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => e.path === 'connections[0].description.en'),
+    'path 要指到缺的那个语言子树：' + JSON.stringify(r.errors));
 });
 
 // === uses / runtime：外部依赖与宿主调用（ADR-0011） ===
@@ -528,7 +585,7 @@ test('uses referencing an unknown module id fails as a dangling reference', () =
 test('uses may point at an external declared later in the modules list', () => {
   // 单趟遍历看不到**后面**才声明的 external —— 这条把「先收集后检查」这个顺序要求钉住。
   const ir = validIR();
-  ir.modules.push({ id: 'ext_path', label: 'node:path', type: 'external', description: 'path utils', input: ['default'] });
+  ir.modules.push({ id: 'ext_path', label: 'node:path', type: 'external', description: { zh: '路径工具', en: 'path utils' }, input: ['default'] });
   ir.modules[1].uses = ['ext_path'];
   const r = validate(ir);
   assert.equal(r.ok, true, JSON.stringify(r.errors));

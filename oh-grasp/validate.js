@@ -8,35 +8,45 @@ function validate(ir, source) {
   const isNonEmptyStr = (x) => typeof x === 'string' && x.trim() !== '';
   const isStrArray = (x) => Array.isArray(x) && x.every((s) => typeof s === 'string');
   // 可译「散文」字段（meta.subtitle / group.label / module.description / connection.label…）：
-  // 旧形态是普通字符串，新形态是 {zh, en}（语言在外）。expand 步只要求「至少一种语言非空」；
-  // 「两种语言都必填」的收紧不属于本步。名字字段（module.label / id / source / from / to）不走这里。
-  const isTranslatable = (x) => isNonEmptyStr(x)
-    || (isObj(x) && (isNonEmptyStr(x.zh) || isNonEmptyStr(x.en)));
-  // 数组项（meta.input / meta.output）比上面的标量字段更宽：旧 isStrArray 对**普通字符串一律放行**，
-  // 空串也放行。expand 步不收口——这一格不能顺手用 isTranslatable，否则就是把校验悄悄收紧了。
-  const isTranslatableItem = (x) => typeof x === 'string'
-    || (isObj(x) && (isNonEmptyStr(x.zh) || isNonEmptyStr(x.en)));
-  const isTranslatableArray = (x) => Array.isArray(x) && x.every((s) => isTranslatableItem(s));
-  const PROSE_HINT = 'must be a non-empty string or a {zh, en} object';
+  // 语言在外、**双语必填**（ADR-0008 契约步）——必须是 {zh, en} 且两边都非空。
+  // 单语产物里那种普通字符串在这里是**错的形态**：它缺了一整种语言，同样报错。
+  // 不给「缺一种就回退」留口子——静默回退会让中英混杂原样回来，那正是最初的病根。
+  // 名字字段（module.label / id / source / from / to）不走这里，它们永远是 string。
+  const isTranslatable = (x) => isObj(x) && isNonEmptyStr(x.zh) && isNonEmptyStr(x.en);
+  // 数组项（meta.input / meta.output）与标量字段是同一把尺子：每一项也必须是双语齐全的 {zh, en}。
+  // 错误 path 落在**数组**上（`meta.input`），不是某一项——调用点看到的是整份列表不合格。
+  const isTranslatableArray = (x) => Array.isArray(x) && x.every((s) => isTranslatable(s));
+  const PROSE_HINT = 'must be a {zh, en} object with both languages non-empty';
 
   // 四段说明（connection.description）：**语言在外、四个固定字段名在内**
   // { zh: { source, process, output, purpose }, en: { … } }（ADR-0008）。
   // 与 translatable 刻意不同形：它的叶子是四个**固定名字**（与用户原话一一对应，不许改名），
   // 不是一段自由散文；单语产物里那种普通字符串在这里是错的形状。
-  // expand 步的宽严：整段 description 可以**缺席**（「每条 connection 都要有四段」是契约步的硬要求），
-  // 但一旦出现，出现的那个语言子树就必须四段齐全、非空——半截的 description 比缺席更危险：
-  // 它会让「用于什么」那一格在画布上静默留白，读者以为那条线没有用途。
+  // 契约步的硬要求：整段 description **必填**，且**两个语言子树都必填**、每个子树四段齐全非空。
+  // 半截的 description 比缺席更危险：它会让「用于什么」那一格在画布上静默留白，读者以为那条线没有用途。
   const FOUR_KEYS = ['source', 'process', 'output', 'purpose'];
   const LANGS = ['zh', 'en'];
   function checkFourPart(desc, p, push) {
+    // 缺席单独报「必填」，不走下面那条形状消息：形状消息说「必须是个对象」，
+    // 读到的人会去改**已经写了但写歪**的那种情况，而这里的问题是**根本没写**。
+    // 四段说明是图上唯一不可从源码推出的文字，模型只能靠报错定位——消息说歪了它就只能猜。
+    if (desc === undefined || desc === null) {
+      push({ path: p, message: 'description is required: every connection needs the four segments in both languages' });
+      return;
+    }
     if (!isObj(desc)) {
       push({ path: p, message: 'description must be an object {zh: {source, process, output, purpose}, en: {…}}' });
       return;
     }
-    let langsSeen = 0;
+    if (LANGS.every((lang) => desc[lang] === undefined)) {
+      push({ path: p, message: 'description needs both zh and en' });
+      return;
+    }
     for (const lang of LANGS) {
-      if (desc[lang] === undefined) continue;
-      langsSeen += 1;
+      if (desc[lang] === undefined) {
+        push({ path: `${p}.${lang}`, message: `${lang} is required: the four segments must be present in both languages` });
+        continue;
+      }
       if (!isObj(desc[lang])) {
         push({ path: `${p}.${lang}`, message: `${lang} must be an object with the four fixed fields (${FOUR_KEYS.join(', ')})` });
         continue;
@@ -46,9 +56,6 @@ function validate(ir, source) {
           push({ path: `${p}.${lang}.${k}`, message: `${k} must be a non-empty string` });
         }
       }
-    }
-    if (langsSeen === 0) {
-      push({ path: p, message: 'description needs at least one of zh / en' });
     }
   }
 
@@ -68,7 +75,7 @@ function validate(ir, source) {
     }
     for (const f of ['input', 'output']) {
       if (!isTranslatableArray(ir.meta[f])) {
-        errors.push({ path: `meta.${f}`, message: `${f} must be an array of strings or {zh, en} objects` });
+        errors.push({ path: `meta.${f}`, message: `${f} must be an array of {zh, en} objects with both languages non-empty` });
       }
     }
   }
@@ -141,7 +148,7 @@ function validate(ir, source) {
       if (m.type === 'internal') {
         if (isNonEmptyStr(m.id)) internalIds.add(m.id);
         if (!isTranslatable(m.detail)) {
-          errors.push({ path: `${p}.detail`, message: `internal module requires detail as ${PROSE_HINT}` });
+          errors.push({ path: `${p}.detail`, message: `internal module detail ${PROSE_HINT}` });
         }
         if (!isNonEmptyStr(m.source)) {
           errors.push({ path: `${p}.source`, message: 'internal module requires source as a non-empty string' });
@@ -238,10 +245,8 @@ function validate(ir, source) {
       if (!isTranslatable(c.label)) {
         errors.push({ path: `${p}.label`, message: `label ${PROSE_HINT}` });
       }
-      // 四段说明：可选字段，存在才校验形态（见 checkFourPart 注释里的宽严取舍）。
-      if (c.description !== undefined && c.description !== null) {
-        checkFourPart(c.description, `${p}.description`, (e) => errors.push(e));
-      }
+      // 四段说明：**必填**（契约步）。缺席、半截、单语都由 checkFourPart 报出，path 指到那一格。
+      checkFourPart(c.description, `${p}.description`, (e) => errors.push(e));
       for (const f of ['from', 'to']) {
         const ref = c[f];
         if (!isNonEmptyStr(ref)) continue;

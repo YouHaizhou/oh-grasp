@@ -33,12 +33,12 @@
       "description": "内部模块之间的数据流。from/to 都必须引用 internal 模块的 id。",
       "items": {
         "type": "object",
-        "required": ["from", "to", "label"],
+        "required": ["from", "to", "label", "description"],
         "properties": {
           "from": { "type": "string", "description": "源内部模块 id。" },
           "to": { "type": "string", "description": "目标内部模块 id。" },
           "label": { "$ref": "#/definitions/translatable", "description": "流动的数据或含义（散文，可译）。中文里写成一句**动宾短语**（如「传入渲染器路径」），它是画布中点显示的那句话。" },
-          "description": { "$ref": "#/definitions/fourPart", "description": "这条线的四段说明：从哪来 / 经过什么处理 / 输出了什么 / 用于什么。可选（硬要求是契约步），存在则四段都不能缺。" }
+          "description": { "$ref": "#/definitions/fourPart", "description": "这条线的四段说明：从哪来 / 经过什么处理 / 输出了什么 / 用于什么。**必填**，且中英两套都要齐——缺一段或缺一种语言都硬报错（契约步已落地）。" }
         }
       }
     }
@@ -85,7 +85,8 @@
     },
     "fourPart": {
       "type": "object",
-      "description": "四段说明。语言在外、四个固定字段名在内（ADR-0008）：{ zh: {…}, en: {…} }。与 translatable **不同形**——它的叶子是四个固定名字，不是一段自由散文；普通字符串在这里是错的形态。「两种语言都必填」与「每条 connection 都必须有四段」由校验脚本在契约步收紧，本定义只描述形态。",
+      "required": ["zh", "en"],
+      "description": "四段说明。语言在外、四个固定字段名在内（ADR-0008）：{ zh: {…}, en: {…} }。与 translatable **不同形**——它的叶子是四个固定名字，不是一段自由散文；普通字符串在这里是错的形态。**每条 connection 都必须有四段、两个语言子树都必填**，由校验脚本硬报错（契约步已落地）。",
       "properties": {
         "zh": { "$ref": "#/definitions/fourPartLang" },
         "en": { "$ref": "#/definitions/fourPartLang" }
@@ -103,18 +104,13 @@
       "description": "一条 connection 在**一种语言**下的四段。四个字段名固定，不得改叫 origin/how/what/why——改名会丢掉字段名与用户原话的一一对应（ADR-0008）；`from` 已被 connection 占用表示源模块 id，也不能挪来表示「数据从哪来」。"
     },
     "translatable": {
-      "oneOf": [
-        { "type": "string", "minLength": 1 },
-        {
-          "type": "object",
-          "properties": {
-            "zh": { "type": "string" },
-            "en": { "type": "string" }
-          },
-          "description": "语言在外：{ \"zh\": …, \"en\": … }。两种语言是否都必填由校验脚本决定。"
-        }
-      ],
-      "description": "可译散文字段。旧形态：普通字符串（单语产物）。新形态：{zh, en}。名字（module.label / id / source / from / to / file 名）不用此定义，它们永远是 string。"
+      "type": "object",
+      "required": ["zh", "en"],
+      "properties": {
+        "zh": { "type": "string", "minLength": 1, "description": "中文。zh 是主要读者的语言，写成通顺的中文。" },
+        "en": { "type": "string", "minLength": 1, "description": "同一句话的英文。" }
+      },
+      "description": "可译散文字段：语言在外，{zh, en} **两种语言都必填且非空**。**普通字符串不是被兼容的另一种形态**——它缺了一整种语言，校验脚本会硬报错（契约步已落地）。名字（module.label / id / source / from / to / file 名）不用此定义，它们永远是 string。"
     }
   }
 }
