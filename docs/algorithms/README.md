@@ -33,45 +33,46 @@
 | 3 | `lineCap` 可容字符数 | 文本 | viewer.js:34 |
 | 4 | `wrap2` 两行折行 | 文本 | viewer.js:40 |
 | 5 | `cutGuard` 代理对边界修正 | 文本 | viewer.js:26 |
-| 6 | 三色标记 DFS 找后向边 | 图 | viewer.js:248 |
-| 7 | Kahn 拓扑排序 + 最长路分层 | 图 | viewer.js:270 |
-| 8 | 重心法（barycenter）交叉最小化 | 图 | viewer.js:295 |
-| 9 | 稳定排序（位次兜底） | 图 | viewer.js:287 |
-| 10 | 弱连通分量分解 | 图 | viewer.js:210 |
-| 11 | 首适应装箱（first-fit row packing） | 图 | viewer.js:356 |
-| 12 | 端口计数（`×N` = 内容种数） | 图 | viewer.js:146 |
-| 13 | 标签/对端/反向索引去重 + 截断（`uniqJoin`，cap 按面宽） | 图 | viewer.js:178 |
-| 14 | 有序哈希聚合（含 collapse 折叠） | 图 | viewer.js:197 |
-| 15 | 三次贝塞尔前向边 | 几何 | viewer.js:664 |
-| 16 | 反馈弧复合路径 | 几何 | viewer.js:670 |
-| 17 | 行几何（层高 + 行内居中） | 几何 | viewer.js:237 |
-| 18 | 区域堆叠 + 尾随网格带 | 几何 | viewer.js:771 |
-| 19 | 白描边文字 + 标签白底衬（`paint-order`） | 几何 | viewer.js:696 |
-| 20 | SVG marker 箭头（`orient="auto"`） | 几何 | viewer.js:751 |
-| 21 | 光标锚定滚轮缩放 | 视图 | viewer.js:898 |
-| 22 | 拖拽平移 + 3px 点击阈值 | 视图 | viewer.js:856 |
-| 23 | 双击 fit（含缩放钳制） | 视图 | viewer.js:916 |
+| 6 | 三色标记 DFS 找后向边 | 图 | viewer.js:261 |
+| 7 | Kahn 拓扑排序 + 最长路分层 | 图 | viewer.js:283 |
+| 8 | 重心法（barycenter）交叉最小化（虚节点一并参与排序） | 图 | viewer.js:353 |
+| 9 | 稳定排序（位次兜底） | 图 | viewer.js:339 |
+| 10 | 弱连通分量分解 | 图 | viewer.js:223 |
+| 11 | 首适应装箱（first-fit row packing） | 图 | viewer.js:452 |
+| 12 | 端口计数（`×N` = 内容种数） | 图 | viewer.js:153 |
+| 13 | 标签/对端/反向索引去重 + 截断（`uniqJoin`，cap 按面宽） | 图 | viewer.js:185 |
+| 14 | 有序哈希聚合（含 collapse 折叠） | 图 | viewer.js:210 |
+| 15 | 前向边形状：三次贝塞尔（跨层 1）/ **虚节点正交折线**（跨层 ≥2，折点由 `flowGeometry` 算） | 几何 | viewer.js:782 / viewer.js:250 |
+| 16 | 反馈弧复合路径 | 几何 | viewer.js:789 |
+| 17 | 行几何（层高 + 行内居中） | 几何 | viewer.js:250 |
+| 18 | 区域堆叠 + 尾随网格带 | 几何 | viewer.js:890 |
+| 19 | 白描边文字 + 标签白底衬（`paint-order`） | 几何 | viewer.js:815 |
+| 20 | SVG marker 箭头（`orient="auto"`） | 几何 | viewer.js:870 |
+| 21 | 光标锚定滚轮缩放 | 视图 | viewer.js:1025 |
+| 22 | 拖拽平移 + 3px 点击阈值 | 视图 | viewer.js:983 |
+| 23 | 双击 fit（含缩放钳制） | 视图 | viewer.js:1043 |
 | 24 | 引用完整性检查 | 校验 | validate.js:221 |
 | 25 | 词边界正则存在性检查 | 校验 | validate.js:280 |
 | 26 | 空白归一化子串匹配 | 校验 | validate.js:288 |
 | 27 | HTML 转义 + JSON 内联转义 | 渲染 | render.js:131 / viewer.js:9 |
 | 28 | 双语取值 `pick` / `pickList` | 渲染 | viewer.js:71 |
 | 29 | UI 文案表 `T` + `tr` / `fmt` | 渲染 | viewer.js:86 |
-| 30 | 端口清单去重（行数 = 内容种数） | 图 | viewer.js:449 |
-| 31 | 可点边单元（加宽命中路径 + `<title>` hover 提示） | 几何 | viewer.js:706 / viewer.js:664 |
-| 32 | 四段说明清单（按来源模块分组 + 缺段显式「—」） | 图 | viewer.js:643 |
+| 30 | 端口清单去重（行数 = 内容种数） | 图 | viewer.js:545 |
+| 31 | 可点边单元（加宽命中路径 + `<title>` hover 提示） | 几何 | viewer.js:825 / viewer.js:782 |
+| 32 | 四段说明清单（按来源模块分组 + 缺段显式「—」） | 图 | viewer.js:739 |
 | 33 | 四段说明校验（语言在外、四格在内） | 校验 | validate.js:31 |
-| 34 | 消费者清单 / 反向索引（数据源 = `module.uses`，宽面 cap 3） | 图 | viewer.js:508 / viewer.js:524 |
+| 34 | 消费者清单 / 反向索引（数据源 = `module.uses`，宽面 cap 3） | 图 | viewer.js:604 / viewer.js:620 |
 | 35 | `uses` 外键完整性（必须指向存在的 external） | 校验 | validate.js:178 |
 | 36 | `runtime` 属性路径正则（拒括号与裸全局） | 校验 | validate.js:194 |
-| 37 | 自适应画布（fit 允许放大 + 画布高 = min(内容高, 视口高)） | 视图 | viewer.js:881 / viewer.js:996 |
+| 37 | 自适应画布（fit 允许放大 + 画布高 = min(内容高, 视口高)） | 视图 | viewer.js:1008 / viewer.js:1123 |
 
 ## 待实现
 
-尚未落地的算法（决策已定，见 `docs/adr/0008-*.md`），落地后再补进对应域：
+尚未落地的算法（决策已定，见对应 ADR），落地后再补进对应域：
 
-- **虚节点正交路由** —— 跨度 ≥2 的前向边逐层穿盒间空隙（几何域）
+- （暂无）
 
+（**虚节点正交路由**已落地，见 `geometry.md` §1 与 `graph.md` §2/§3：跨度 ≥2 的前向边逐层穿盒间空隙，虚节点进层内序列参与 barycenter、但不渲染形状——ADR-0009。）
 （**双语切换**已落地，见 `rendering.md` §3：`pick` 取值 + viewer 内 `T` 文案表 + header 切换器。）
 （**端点外移**已落地，见 `geometry.md` §1/§2：入边终点抬到目标盒上边缘上方 `PORT_GAP = 8` px。）
 （**可点边 + 四段说明**已落地，见 `rendering.md` §3/§5、`graph.md` §10、`validation.md` §5：一条边是一个 `<g class="edge">`（加宽命中路径 + `<title>`），点开弹四段；`connection.description` 此刻是**可选**字段，`generated/` 里那份产物还没有它——「每条 connection 四段齐全」是契约步的事。）
@@ -85,4 +86,4 @@
 41 个模块的量级下都无碍，但值得留名：
 
 - Kahn 的队列用 `Array.shift()`（O(n) 出队）、兜底分支用 `indexOf` 扫全表（O(V²)）——见 graph.md
-- 重心法的 `predsOf`/`succsOf` 每次调用都 `filter` 一遍全边集，整体 O(V·E·passes)——见 graph.md
+- 重心法的 `predsOf`/`succsOf` 每次调用都 `filter` 一遍全边集，整体 O(V·E·passes)。**虚节点把 E 撑宽了**（|E| += Σ(跨度−1)），这条负债因此比记它的时候更明显——见 graph.md

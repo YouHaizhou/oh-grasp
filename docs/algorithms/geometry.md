@@ -22,11 +22,13 @@
 
 ---
 
-## 1. 三次贝塞尔前向边
+## 1. 前向边的两种形状：三次贝塞尔（跨层 1）+ 虚节点正交折线（跨层 ≥2）
 
 **问题**：层间的连线。直线当然可以，但两条从同一出口上下分叉的线会重叠成一团，且读者无法判断线在哪一条上行。
 
-**做法**：三次贝塞尔，控制点选在**两端 x 上、纵向中点 y 上**
+### 跨层 1：三次贝塞尔
+
+**做法**：控制点选在**两端 x 上、纵向中点 y 上**
 
 ```
 M x1 y1  C x1 my  x2 my  x2 y2     my = (y1 + y2) / 2
@@ -34,13 +36,34 @@ M x1 y1  C x1 my  x2 my  x2 y2     my = (y1 + y2) / 2
 
 效果：从源盒底边**竖直出发**、到目标盒顶边**竖直到达**，中间平滑过渡。竖直的出入段让「哪条线接在哪个端口上」一目了然——这正是端口为中心的节点盒（ADR-0006）要的读法。
 
-**入端终点不在盒顶边上，而在它上方 `PORT_GAP = 8` px**（`y2 = b.y − 8`，端口圆点外缘之上）：终点正落在盒顶边时，箭头会被**后画**的盒体与端口圆点盖住。**层序不动**（节点仍画在边之后）——外移 8px 已经够让箭头露在端口正上方（ADR-0009）。
+### 跨层 ≥2：虚节点正交折线
+
+**为什么不再是曲线**（ADR-0009 推翻 ADR-0007 的「长边走贝塞尔」）：贝塞尔的中段会**直接压在中间层的盒体上**——一条跨三层的前向边，曲线最平的那一段正好横穿第二层的盒子。
+
+**做法**：在每一对相邻层之间插一个**虚节点**，线段逐层直角穿下。
+
+- 虚节点**无实体、无形状、不渲染**（`flowGeometry` 把它标进返回的 `virtual` 表，渲染层据此跳过）；
+- 虚节点**进层内序列**：占一个位次、参与 barycenter 重排。它的尺寸是 `{w: 0, h: 0}`（**不写进调用方的 `sizes` 表**——那张表是「盒」的表），所以位次一落定，它必然落在该层的**空隙**里（左右各留 `HGAP`）；
+- 折线路线：源盒底边中点 → 竖直下到「源层与下一层之间那条空隙的中线」→ 沿中线**横移**到下一个虚节点那一列 → 沿那一列**竖直穿下一层**（那一列是该层空隙，所以不碰盒）→ 逐层重复 → 最后一条空隙的中线横移到目标盒中线 → 竖直下到目标盒上边之上 `PORT_GAP`；
+- **横向段全部落在层间空隙的中线上**（那里没有任何盒），**竖直段全部落在空隙列上**。允许与别的边交叉，只保证**不穿盒**——交叉能忍（读者能顺着线走），穿盒不能忍（盒是不透明矩形，穿过等于断线）；
+- **被否掉的两条方案**（绕顶部/底部的大弧、在中间层一次跳过去）**见 ADR-0009**——取舍的理由记在那里，这里不展开（ADR-0012 决策二）。
+
+**折点序列由谁算**：`flowGeometry`，返回 `longs: [{ from, to, points }]`——只有它同时握着**层带 y**（`yTop` / `rowH`）与**层内位次 x**（`pos`）。`fwdPath(a, b, sA, sB, pts)` 只负责把折点连成 `d`（`orthPath`）；传了 `pts` 就走折线，不传（跨层 1）走贝塞尔。
+
+**中点标签的锚点**：取「离路径纵向中点最近的那条**水平段**」的中点——水平段都在空隙中线上，标签连白底衬一起压在空隙里，不盖盒。横向溢出只是与别的边交叉，那是允许的。全是竖直段（空隙列逐层重合）时退化成路径中点。
+
+**虚节点只进几何**：不进返回的 `fwd`（那是真实边，渲染按它走）、不进 `sizes` 表、也不进任何连接表——`countPorts` / `aggregateEdges` 的单位分别是「单元 id × 方向」与「聚合边」，虚节点两者都不是（见 graph.md 第 7 / 9 节）。**边数因此不再等于几何单元数**：这是 ADR-0009 记下的代价。
+
+### 两种形状共同的入端约定
+
+**入端终点不在盒顶边上，而在它上方 `PORT_GAP = 8` px**（`y2 = b.y − 8`，端口圆点外缘之上）：终点正落在盒顶边时，箭头会被**后画**的盒体与端口圆点盖住。**层序不动**（节点仍画在边之后）——外移 8px 已经够让箭头露在端口正上方（ADR-0009）。折线的入端同样是盒宽中点、盒顶之上 8px。
 
 **为什么不用直线**：直线接入盒顶时是斜的，斜线在端口圆点附近会挤成一片，箭头方向也不明确。
 
 **它产出的是「路径几何」，不是「边」**：`fwdPath` 只算 `d` 与中点 `{xm, my}`，把 `d`、中点、标签、命中路径、hover 提示拼成**一个可点单元**的是 `fwdEdgeSvg`（见 rendering.md §3）。
 
-**位置**：viewer.js:664。
+**位置**：viewer.js:782（`fwdPath` / `orthPath` 紧邻其前）、viewer.js:250（`flowGeometry`，折点在函数末尾算）。
+**测试**：`test/layout.test.js` —「a ≥2-layer forward edge becomes an orthogonal polyline, not a curve」、「no segment of a long forward edge crosses a box in an intermediate layer」、「the bilingual fixture reroutes its one ≥2-layer edge clear of the boxes」、「a one-layer forward edge keeps the cubic bezier; only ≥2 hops go orthogonal」、「virtual nodes take a slot in the layer order but carry no box」、「a long forward edge resolves inside the canvas width: the lane stays feedback-only」。
 
 ---
 
@@ -58,13 +81,15 @@ M x1 y1  C x1 my  x2 my  x2 y2     my = (y1 + y2) / 2
 
 三段拼接：`C … ` → `L gx y` → `C …`。视觉上：橙色（`#f59e0b`）、虚线（`5 3`）、独立箭头 marker（橙色）、标签带 `↺` 前缀、右对齐贴在通道内。
 
-**为什么走右侧而不是绕过上方/下方**：右侧是唯一还没被占用的方向（上方有层 0、下方有最深层、左侧留给可能的对称扩展）。且侧栏位置本身成了**语义信号**——「在侧栏上跑的一定是回边」（ADR-0008 把这条升级成了硬规则：侧栏只服务反馈边）。
+**为什么走右侧而不是绕过上方/下方**：右侧是唯一还没被占用的方向（上方有层 0、下方有最深层、左侧留给可能的对称扩展）。且侧栏位置本身成了**语义信号**——「在侧栏上跑的一定是回边」（ADR-0009 把这条升级成了硬规则：侧栏只服务反馈边）。
+
+**这条通道只放反馈边，实测成立**：长前向边已在画布内由虚节点正交折线解决（§1），**不借道这里**——折线的每一列都落在 `[0, Wc]` 内，画布宽度 `g.W = g.Wc + lane` 里那 170px 对它没有贡献。使用者只有 `feedbackPath`（用 `gx = Wc + 26`）与 `backEdgeSvg`（标签右对齐贴通道），`fwdEdgeSvg` 只吃 `{d, xm, my}`，没有通道参数、也不读 `lane`。ADR-0009 里被否掉的「让侧栏兼任长边旁路」没有实现。测试：「a long forward edge resolves inside the canvas width: the lane stays feedback-only」。
 
 **通道宽度只在有反馈边时产生**（`lane = back.length ? 170 : 0`）——没有回边的图不该多出 170px 空白。
 
 **与 `fwdPath` 一样**，它只算几何；拼成可点单元的是 `backEdgeSvg`（标签带 `↺` 前缀，`<title>` 里也是带前缀的整句，见 rendering.md §3）。
 
-**位置**：viewer.js:670。
+**位置**：viewer.js:789。
 
 ---
 
@@ -81,7 +106,7 @@ M x1 y1  C x1 my  x2 my  x2 y2     my = (y1 + y2) / 2
 
 **为什么居中而不是左对齐**：分层图天然是中间宽两头窄的菱形（第一层和最后一层通常只有一两个盒子）。左对齐会让菱形歪向一边、左侧留白巨大，正是用户反馈里的「左右侧空白」问题的一个来源。
 
-**位置**：viewer.js:237（行高与行内居中都在 `flowGeometry` 内）。
+**位置**：viewer.js:250（行高与行内居中都在 `flowGeometry` 内）。
 
 ---
 
@@ -101,7 +126,7 @@ M x1 y1  C x1 my  x2 my  x2 y2     my = (y1 + y2) / 2
 
 网格带同理，多一个横向居中：`translate((contentW - grid.W) / 2, grid.top)`。
 
-**位置**：viewer.js:771（区域堆叠游标，在 `flowSvg` 内）。
+**位置**：viewer.js:890（区域堆叠游标，在 `flowSvg` 内）。
 **测试**：`oh-grasp/fortest/smoke-viewer.js` —「多弱连通分量堆叠为纵向独立 translate 区（不重叠）」（断言 ≥3 个 `translate` 且 y 各不相同、6 个节点各渲染一次）。
 
 ---
@@ -125,7 +150,7 @@ M x1 y1  C x1 my  x2 my  x2 y2     my = (y1 + y2) / 2
 
 **它与上面那条理由的关系**：矩形的宽高确实是用**估值**算的（`edgeLabelParts` 里的 `chW` 累加，与 `fitWidth` 截断用同一把尺子），所以它比字形略宽或略窄是可能的。但误差的后果从「文字读不清」降级成了「白底衬边缘多出或少掉一两个像素」——文字本身仍有精确的描边兜着。**取舍：拿一点点视觉精度换一整块可点面积，值。** 这条估算误差目前只在真机上看得到，没有自动断言（见 rendering.md 第 4 节的覆盖缺口）。
 
-**位置**：viewer.js:696（`edgeLabelParts`，描边文字与白底衬在这里一起产出）；描边文字在 `fwdEdgeSvg` / `backEdgeSvg` 两处使用（viewer.js:706 / viewer.js:717）。
+**位置**：viewer.js:815（`edgeLabelParts`，描边文字与白底衬在这里一起产出）；描边文字在 `fwdEdgeSvg` / `backEdgeSvg` 两处使用（viewer.js:825 / viewer.js:836）。
 
 ---
 
@@ -137,7 +162,7 @@ M x1 y1  C x1 my  x2 my  x2 y2     my = (y1 + y2) / 2
 
 **为什么不用手工画三角形**：手工画要自己算切线角度（贝塞尔端点的切线是控制点连线方向），且箭头位置要留出路径缩短量。`marker` 是 SVG 原生能力，`refX` 负责把箭尖对齐到路径终点。
 
-**位置**：viewer.js:751（`markerDef`）。
+**位置**：viewer.js:870（`markerDef`）。
 
 ---
 
@@ -155,4 +180,4 @@ M x1 y1  C x1 my  x2 my  x2 y2     my = (y1 + y2) / 2
 
 **hover 提示**（`<title>`）：`nodeSvg` 的第一条子元素是一条 `<title>`，内容是**未截断的完整名字**（盒里那行是 `fitWidth` 截断过的）。名字被截断时，读者把鼠标停上去就能读全——截断只影响画布上的排版，不影响能不能读到名字。返回的字符串会被 `flowSvg` 包进 `<g class="node">`，所以这条 `<title>` 就是这个组的 hover 提示。
 
-**位置**：viewer.js:392（`nodeSvg`）、viewer.js:429（`portMark`）、viewer.js:440（`unitName`）、viewer.js:449（`portRows`）、viewer.js:477（`portListHtml`）。
+**位置**：viewer.js:488（`nodeSvg`）、viewer.js:525（`portMark`）、viewer.js:536（`unitName`）、viewer.js:545（`portRows`）、viewer.js:573（`portListHtml`）。

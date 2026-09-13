@@ -139,7 +139,14 @@
      返回 { id: { in, out, inRep, outRep } }：in/out 是两个方向的内容种数，
      inRep/outRep 是各方向 IR 顺序第一条 connection 的 label 字段（原样存，渲染时按
      语言 pick）——代表内容由 nodeSvg 画在 ×N 右侧。
-     没有 label 的 connection 贡献不了「内容」，跳过（schema 里 label 必填，正常产物没有）。 */
+     没有 label 的 connection 贡献不了「内容」，跳过（schema 里 label 必填，正常产物没有）。
+
+     **单位（票 03 确认）**：计数的单元是「**单元 id × 方向**」——键是调用方给的真实模块 / 分组
+     id，值是该方向**不同内容的种数**。它既不是连接条数（去重闸门 `if (sz[dir][txt]) return;` 就
+     是为此），也不是画布上的**几何段数**（一条长前向边被折成几段是布局的事）。所以**虚节点
+     绝不能进来**：它没有盒、没有端口，一旦成为一个计数单元就会凭空多出一个 ×N。虚节点只活在
+     flowGeometry 的几何里、不进连接表，本函数因此天然看不到它——**改 flowGeometry 时别把虚
+     节点塞进 aggregated edges**，这是「虚节点只能是几何量」这条约束的落点。 */
   // 一个端口的零值：某方向没有内容时用它（N=0 → 「—」）。挪成一处，免得两处字面量各自漂移。
   function emptyPort() { return { in: 0, out: 0, inRep: null, outRep: null }; }
 
@@ -186,14 +193,20 @@
     return out.slice(0, keep).join(' · ') + ' +' + (out.length - keep);
   }
 
-  /* ---------- 边 label 聚合（label 是可译散文，按语言取值后去重） ---------- */
+  /* ---------- 边 label 聚合（label 是可译散文，按语言取值后去重） ----------
+     **不计数（票 03 确认）**：它产出的是**一段文本**（≤3 个用 ` · ` 连、再多收尾成 `+N`），
+     `+N` 里的 N 是「还有 N 种**不同标签**」——不是连接条数，也不是画布上的几何段数。 */
   function edgeLabel(e, lang) {
     return uniqJoin((e && e.conns || []).map(function (cn) { return cn ? pick(cn.label, lang) : ''; }));
   }
 
   /* ---------- 边聚合：同向多 connection 并成一条 {from,to,conns} ----------
      collapse(c) 可把端点折叠成上层单元（如 member → 所在 group），返回 {from,to}；
-     conns 里始终保留原始 connection（from/to 是真实模块 id），供端口清单展示。 */
+     conns 里始终保留原始 connection（from/to 是真实模块 id），供端口清单展示。
+
+     **单位（票 03 确认）**：一条**聚合边**——入参是 IR 的 connections，出参的条数 = 同向
+     (from,to) 对的个数（不是 connection 条数，不是几何段数）。虚节点不进这里：它没有
+     connection，长边在画布上被折成几段是 flowGeometry 的事（那份折点几何量），与本函数无关。 */
   function aggregateEdges(conns, collapse) {
     var byKey = {}, order = [];
     (conns || []).forEach(function (c) {
@@ -280,17 +293,62 @@
       layer[id] = mx + 1; fin.push(id);
     });
 
+    /* ---------- 虚节点：跨层 ≥2 的前向边拆成逐层链（ADR-0009） ----------
+       一条 u→v 跨 3 层的前向边，在中间每一层各插一个**虚节点**：无实体、无形状、不渲染。
+       它只做两件事：占层内序列的一个位次（于是被 barycenter 重排，最终落在该层的**空隙**里），
+       以及给折线提供「在哪一列竖直穿层」的 x。
+       虚节点**只进几何**：不进返回的 `fwd`（那是真实边，渲染按它走）、不进调用方的 `sizes`
+       表（那张表是「盒」的表，虚节点没有盒），也永远不出现在 countPorts / aggregateEdges
+       的连接表里——那两张表的单位分别是「单元 id × 方向」与「聚合边」，虚节点两者都不是。 */
+    var vset = Object.create(null);          // 虚节点 id → true。渲染层据此跳过，不画形状。
+    var chains = [];                         // 每条长边一条链：[from, vn, …, to]
+    var usedId = Object.create(null);
+    nodes.forEach(function (id) { usedId[id] = true; });
+    var vseq = 0;
+    fwd.forEach(function (e) {
+      var La = layer[e.from], Lb = layer[e.to];
+      if (!(Lb - La >= 2)) return;           // 跨层 1（以及端点缺层号的异常输入）：保持原样
+      var chain = [e.from];
+      for (var L = La + 1; L < Lb; L++) {
+        // 前缀不保证独占（schema 只要求 id 唯一），所以撞了就换一个，别覆盖真实节点。
+        var vid = '__vn' + (vseq++);
+        while (usedId[vid]) vid = '__vn' + (vseq++);
+        usedId[vid] = true;
+        vset[vid] = true;
+        chain.push(vid);
+      }
+      chain.push(e.to);
+      chains.push({ from: e.from, to: e.to, chain: chain });
+    });
+    // 虚节点的尺寸：宽 0（落点因此在层内空隙里，而不是压在某个盒的 x 区间上）、高 0（不抬高行高）。
+    var VZERO = { w: 0, h: 0 };
+    function sizeOf(id) { return vset[id] ? VZERO : sizes[id]; }
+
     // 层内排序：先按拓扑序（fin）稳定分组，再 barycenter 扫描压交叉。
     var layers = [];
     fin.forEach(function (id) { var L = layer[id]; (layers[L] = layers[L] || []).push(id); });
+    // 虚节点进层内序列（占位、被 barycenter 重排）：先挂在真实节点之后，位次由排序决定。
+    chains.forEach(function (c) {
+      var La = layer[c.from];
+      for (var k = 1; k < c.chain.length - 1; k++) {
+        var L2 = La + k;
+        (layers[L2] = layers[L2] || []).push(c.chain[k]);
+      }
+    });
 
     function stableSort(arr, weight) {
       return arr.map(function (x, i) { return { x: x, w: weight(x), i: i }; })
         .sort(function (a, b) { return a.w - b.w || a.i - b.i; })
         .map(function (o) { return o.x; });
     }
-    function predsOf(id) { return fwd.filter(function (e) { return e.to === id; }).map(function (e) { return e.from; }); }
-    function succsOf(id) { return fwd.filter(function (e) { return e.from === id; }).map(function (e) { return e.to; }); }
+    // barycenter 的邻接 = 真实前向边 + 长边拆出的 hop：虚节点因此与它的上下跳互相牵引，
+    // 排到「既靠近源、又靠近目标」的那条空隙里。返回值里的 `fwd` 仍是真实边，不受这份邻接影响。
+    var baryEdges = fwd.slice();
+    chains.forEach(function (c) {
+      for (var k = 0; k + 1 < c.chain.length; k++) baryEdges.push({ from: c.chain[k], to: c.chain[k + 1] });
+    });
+    function predsOf(id) { return baryEdges.filter(function (e) { return e.to === id; }).map(function (e) { return e.from; }); }
+    function succsOf(id) { return baryEdges.filter(function (e) { return e.from === id; }).map(function (e) { return e.to; }); }
     var passes = Math.min(5, Math.max(3, layers.length));
     for (var p = 0; p < passes; p++) {
       // 下行：按上一层前驱的平均位次排本层
@@ -327,7 +385,7 @@
     for (var r = 0; r < layers.length; r++) {
       yTop.push(yc);
       var h = 0;
-      layers[r].forEach(function (id) { h = Math.max(h, sizes[id].h); });
+      layers[r].forEach(function (id) { h = Math.max(h, sizeOf(id).h); });
       rowH.push(h);
       yc += h + VGAP;
     }
@@ -336,20 +394,58 @@
     var Wc = 0;
     layers.forEach(function (row) {
       var w = 0;
-      row.forEach(function (id, i) { w += sizes[id].w + (i ? HGAP : 0); });
+      row.forEach(function (id, i) { w += sizeOf(id).w + (i ? HGAP : 0); });
       Wc = Math.max(Wc, w);
     });
     var pos = {};
     layers.forEach(function (row, L) {
       var rowW = 0;
-      row.forEach(function (id, i) { rowW += sizes[id].w + (i ? HGAP : 0); });
+      row.forEach(function (id, i) { rowW += sizeOf(id).w + (i ? HGAP : 0); });
       var x = (Wc - rowW) / 2;
       row.forEach(function (id) {
         pos[id] = { x: x, y: yTop[L] };
-        x += sizes[id].w + HGAP;
+        x += sizeOf(id).w + HGAP;
       });
     });
-    return { layers: layers, pos: pos, Wc: Wc, H: H, fwd: fwd, back: back, sizes: sizes };
+
+    /* ---------- 长边的正交折线几何（跨层 ≥2 的前向边） ----------
+       折点序列在这里算，因为只有这里同时握着**层带 y**（yTop / rowH）与**层内位次 x**（pos）。
+       路线：源盒底边中点竖直下到「源层与下一层之间那条空隙的中线」→ 在这条中线上横move到
+       下一个虚节点那一列 → 沿那一列竖直穿下一层（虚节点占的是该层空隙，所以不穿盒）→ …
+       → 最后一条空隙的中线横move到目标盒中线 → 竖直下到目标盒上边之上 PORT_GAP。
+       横向段全部落在层间空隙的中线上（那里没有任何盒），竖直段全部落在空隙列上——**允许与
+       别的边交叉，只保证不穿盒**（ADR-0009）。渲染层只负责把折点拼成 `d`（见 fwdPath）。 */
+    var longs = [];
+    function gapMid(L) { return yTop[L] + rowH[L] + VGAP / 2; }   // 第 L 层与第 L+1 层之间那条空隙的中线
+    chains.forEach(function (c) {
+      var pa = pos[c.from], pb = pos[c.to], sa = sizes[c.from], sb = sizes[c.to];
+      if (!pa || !pb || !sa || !sb) return;
+      var La = layer[c.from], Lb = layer[c.to];
+      var x1 = pa.x + sa.w / 2, y1 = pa.y + sa.h;        // 源盒底边中点（与前向边一致）
+      var x2 = pb.x + sb.w / 2, y2 = pb.y - PORT_GAP;    // 目标盒上边之上 PORT_GAP（与前向边一致）
+      var pts = [{ x: x1, y: y1 }], cx = x1;
+      for (var L = La + 1; L < Lb; L++) {
+        var mx = pos[c.chain[L - La]].x;                 // chain[k] 就是第 La+k 层的那个节点
+        pts.push({ x: cx, y: gapMid(L - 1) });
+        pts.push({ x: mx, y: gapMid(L - 1) });
+        cx = mx;
+      }
+      pts.push({ x: cx, y: gapMid(Lb - 1) });
+      pts.push({ x: x2, y: gapMid(Lb - 1) });
+      pts.push({ x: x2, y: y2 });
+      // 去掉零长段（后一个折点与前一个重合，例如虚节点正好落在源盒中线上）：d 里少一段噪声，
+      // 断言里也少一个退化区间（退化区间会平凡通过「不落在盒的 x 区间内」）。
+      var clean = [];
+      pts.forEach(function (p) {
+        var last = clean[clean.length - 1];
+        if (last && last.x === p.x && last.y === p.y) return;
+        clean.push(p);
+      });
+      longs.push({ from: c.from, to: c.to, points: clean });
+    });
+
+    return { layers: layers, pos: pos, Wc: Wc, H: H, fwd: fwd, back: back, sizes: sizes,
+      virtual: vset, longs: longs };
   }
 
   /* ---------- 独立带：无连接节点包成网格 ---------- */
@@ -658,10 +754,33 @@
     }).join('');
   }
 
-  /* ---------- 边（前向 + 反馈）路径 ---------- */
+  /* ---------- 边（前向 + 反馈）路径 ----------
+     前向边有**两种形状**（ADR-0009）：跨层 1 的走三次贝塞尔（fwdPath 的默认分支），
+     跨层 ≥2 的走虚节点正交折线（orthPath，折点来自 flowGeometry.longs）。两者入端一致。 */
   // 入边终点落在目标盒上边缘**上方** PORT_GAP px（即端口圆点外缘之上），箭头才不会被后画的
   // 盒体 / 端口圆点盖住（ADR-0009）。层序不动：节点仍画在边之后，只让箭头露出来。
-  function fwdPath(a, b, sA, sB) {
+  // 跨层 ≥2 的前向边不走曲线——曲线中段会压在中间层的盒体上（ADR-0009 推翻 ADR-0007 的那条）。
+  // 它的折点序列由 flowGeometry（`longs`）给出：那里才知道层带与层内空隙在哪。这里只把折点连成 `d`。
+  function orthPath(pts) {
+    var d = 'M' + pts[0].x + ' ' + pts[0].y;
+    for (var i = 1; i < pts.length; i++) d += ' L' + pts[i].x + ' ' + pts[i].y;
+    // 标签锚点取「离路径纵向中点最近的那条水平段」的中点：水平段都落在层间空隙的中线上，
+    // 标签连白底衬一起压在空隙里，不盖盒（横向溢出只是与别的边交叉，那是允许的）。
+    // 全是竖直段（起止同列、空隙列逐层重合）时退化成路径的中点。
+    var midY = (pts[0].y + pts[pts.length - 1].y) / 2;
+    var xm = (pts[0].x + pts[pts.length - 1].x) / 2, my = midY, best = Infinity;
+    for (var j = 1; j < pts.length; j++) {
+      if (pts[j].y !== pts[j - 1].y) continue;
+      if (Math.abs(pts[j].y - midY) < best) {
+        best = Math.abs(pts[j].y - midY);
+        xm = (pts[j].x + pts[j - 1].x) / 2; my = pts[j].y;
+      }
+    }
+    return { d: d, xm: xm, my: my };
+  }
+  // pts 缺席 = 跨层 1 的边，走原来的三次贝塞尔（形状与端点都没动）。
+  function fwdPath(a, b, sA, sB, pts) {
+    if (pts && pts.length > 1) return orthPath(pts);
     var x1 = a.x + sA.w / 2, y1 = a.y + sA.h;
     var x2 = b.x + sB.w / 2, y2 = b.y - PORT_GAP;
     var my = (y1 + y2) / 2;
@@ -773,6 +892,9 @@
       var sz = {};
       c.nodes.forEach(function (id) { sz[id] = size(id); });
       var g = flowGeometry(c.nodes, c.edges, sz);
+      // 右侧这条通道**只放反馈边**（ADR-0009 §侧栏只服务反馈边）：长前向边已在画布内由虚节点
+      // 正交折线解决，不借道这里。通道宽度也只在真有回边时才产生。票 03 确认成立，未新增借道者
+      // ——使用它的只有 feedbackPath（用 gx）与 backEdgeSvg（标签右对齐）。
       var lane = g.back.length ? 170 : 0;
       g.lane = lane;
       g.gx = g.Wc + 26;
@@ -815,16 +937,21 @@
         var lbl = edgeLabel(e, lang) || tr(lang, 'feedback');
         part += backEdgeSvg(e, pa.d, lbl, g.Wc + g.lane - 10, pa.mid, g.lane, mB.id);
       });
-      // 前向边 path + label
+      // 前向边 path + label：跨层 ≥2 的边带上 flowGeometry 给的折点序列（走正交折线），
+      // 跨层 1 的没有折点（走三次贝塞尔）。
+      var longOf = {};
+      g.longs.forEach(function (l) { longOf[l.from + '|' + l.to] = l; });
       g.fwd.forEach(function (e) {
         var a = g.pos[e.from], b = g.pos[e.to];
         if (!a || !b) return;
-        var p = fwdPath(a, b, g.sizes[e.from], g.sizes[e.to]);
+        var l = longOf[e.from + '|' + e.to];
+        var p = fwdPath(a, b, g.sizes[e.from], g.sizes[e.to], l && l.points);
         part += fwdEdgeSvg(e, p, edgeLabel(e, lang), mF.id);
       });
       // 节点最后画（层序不动，见 ADR-0009：入端已外移 PORT_GAP，箭头落在端口圆点上方露出来）
       g.layers.forEach(function (row) {
         row.forEach(function (id) {
+          if (g.virtual[id]) return;   // 虚节点只在层内序列里占位，不渲染任何形状（ADR-0009）
           var p = g.pos[id];
           var kind = G[id] ? 'group' : 'internal';
           part += '<g class="node" data-id="' + esc(id) + '" data-kind="' + kind + '">' + nodeSvg(id, p.x, p.y, counts, lang, M, G) + '</g>';

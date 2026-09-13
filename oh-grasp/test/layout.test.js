@@ -68,10 +68,150 @@ test('every node gets a position; no same-row box overlaps its row neighbour', (
   ids.forEach((id) => assert.ok(g.pos[id], `pos for ${id}`));
   g.layers.forEach((row) => {
     for (let i = 1; i < row.length; i++) {
-      const prev = g.pos[row[i - 1]], cur = g.pos[row[i]];
-      assert.ok(cur.x >= prev.x + 236, 'horizontal gap respected between same-row boxes');
+      const prevId = row[i - 1];
+      // 间距按前一个条目的**盒宽**算（叶 236 / 组 282）。虚节点没有盒（票 03），宽度按 0 ——
+      // 它只要求 HGAP 的间隙。写死 236 的话，层里一旦混进虚节点这条断言就会假报重叠。
+      const need = g.sizes[prevId] ? g.sizes[prevId].w : 0;
+      assert.ok(g.pos[row[i]].x >= g.pos[prevId].x + need, 'horizontal gap respected between same-row boxes');
     }
   });
+});
+
+// ---- 虚节点正交折线：跨层 ≥2 的前向边不穿盒（ADR-0009，推翻 ADR-0007 的「长边走贝塞尔」） ----
+// 立体形状：a→b→c→d 四层，外加一条 a→d。a、d 的盒中线在 x 上对齐，而层 1 / 层 2 的盒正压着
+// 这条中线——直连（直线或曲线）必穿盒。折线只能先在层间空隙里横向挪到别的列，再逐层竖直穿下。
+const LONG_IDS = ['a', 'b', 'c', 'd'];
+const LONG_EDGES = [
+  { from: 'a', to: 'b' }, { from: 'b', to: 'c' }, { from: 'c', to: 'd' }, { from: 'a', to: 'd' },
+];
+const longG = () => L.flowGeometry(LONG_IDS, LONG_EDGES, SZ(LONG_IDS));
+
+// 折点序列 → 线段（每段取 AABB）；盒 → AABB。同层两盒横向不重叠，所以「不穿盒」可以在
+// AABB 上用**严格不等**判：只碰到边界（出边起点在源盒底边、入边终点在目标盒上方）不算穿。
+const segOf = (pts) => pts.slice(1).map((p, i) => ({
+  x1: Math.min(pts[i].x, p.x), x2: Math.max(pts[i].x, p.x),
+  y1: Math.min(pts[i].y, p.y), y2: Math.max(pts[i].y, p.y),
+}));
+const boxOf = (id, g) => {
+  const p = g.pos[id], s = g.sizes[id];
+  return { x1: p.x, x2: p.x + s.w, y1: p.y, y2: p.y + s.h };
+};
+const overlap = (a, b) => a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2;
+const realIds = (g, li) => g.layers[li].filter((id) => !g.virtual[id]);
+
+// 「中间层不穿盒」的通用断言：对每一层，凡是纵向跨度与该层**行带**相交的段，其横向区间都不得
+// 落在该层任一盒的 x 区间内。中间层 = 折线的纵向跨度里除源层 / 目标层以外的那些层。
+function assertNoBoxCut(g, longs) {
+  const bandOf = (li) => {
+    const mem = realIds(g, li);
+    const yTop = g.pos[mem[0]].y;
+    return { y1: yTop, y2: yTop + Math.max.apply(null, mem.map((id) => g.sizes[id].h)), boxes: mem.map((id) => boxOf(id, g)) };
+  };
+  longs.forEach((l) => {
+    const pts = l.points, segs = segOf(pts);
+    const La = layerAtY(g, g.pos[l.from].y), Lb = layerAtY(g, g.pos[l.to].y);
+    assert.ok(La >= 0 && Lb - La >= 2, `${l.from}→${l.to} 应该是一条跨层 ≥2 的边，层号要认得出来`);
+    let probed = 0;   // 真的被「段 × 盒」检过的对数——0 就说明这条断言是空洞的
+    for (let li = La + 1; li < Lb; li++) {
+      const band = bandOf(li);
+      segs.forEach((s, i) => {
+        if (!(s.y1 < band.y2 && band.y1 < s.y2)) return;          // 这一段没落在本层行带里
+        band.boxes.forEach((b) => {
+          probed++;
+          assert.ok(!overlap(s, b),
+            `${l.from}→${l.to} 第 ${i} 段（y ${s.y1}..${s.y2}，x ${s.x1}..${s.x2}）穿过了层 ${li} 的盒（x ${b.x1}..${b.x2}）`);
+        });
+      });
+    }
+    assert.ok(probed > 0, `${l.from}→${l.to} 没有任何一段落在中间层的行带里——这条断言没检到东西`);
+    // 加强版：**任何**盒（含源层 / 目标层）都不被穿过——出边起点在源盒底边、入边终点在目标盒
+    // 上方 PORT_GAP，都只碰到边界，严格不等判据下不算穿。
+    g.layers.forEach((row, Li) => {
+      realIds(g, Li).forEach((id) => {
+        const b = boxOf(id, g);
+        segs.forEach((s, i) => assert.ok(!overlap(s, b),
+          `${l.from}→${l.to} 第 ${i} 段穿过了层 ${Li} 的盒 ${id}`));
+      });
+    });
+  });
+}
+// 折点落在哪一层：按 pos 的 y 找行（层内所有节点顶对齐）。
+const layerAtY = (g, y) => {
+  for (let li = 0; li < g.layers.length; li++) if (g.pos[realIds(g, li)[0]].y === y) return li;
+  return -1;
+};
+
+test('a ≥2-layer forward edge becomes an orthogonal polyline, not a curve', () => {
+  const g = longG();
+  assert.equal(g.longs.length, 1, '只有 a→d 跨层 ≥2，只有它拿到折点几何量');
+  assert.equal(g.longs[0].from, 'a');
+  assert.equal(g.longs[0].to, 'd');
+  const pts = g.longs[0].points;
+  assert.ok(pts.length >= 4, '至少三个折：下 → 横向挪位 → 穿层 → … → 到达');
+  segOf(pts).forEach((s, i) => assert.ok(s.x1 === s.x2 || s.y1 === s.y2, `第 ${i} 段是斜的，不是正交折线`));
+  assert.deepEqual(pts[0], { x: g.pos.a.x + g.sizes.a.w / 2, y: g.pos.a.y + g.sizes.a.h }, '起于源盒底边中点');
+  assert.equal(pts[pts.length - 1].x, g.pos.d.x + g.sizes.d.w / 2, '入端 x = 目标盒宽中点');
+  assert.equal(pts[pts.length - 1].y, g.pos.d.y - 8, '入端 = 目标盒上边缘 - 8px（与前向边一致）');
+  assert.equal(pts[0].x, pts[pts.length - 1].x, '前提：源、目标的中线在 x 上对齐');
+  assert.ok(pts.some((p) => p.x !== pts[0].x), '中途确实横向挪开了（否则就是一条直线穿盒）');
+  const ys = pts.filter((q, i) => i && q.y === pts[i - 1].y).map((q) => q.y);
+  const p = L.fwdPath(g.pos.a, g.pos.d, g.sizes.a, g.sizes.d, pts);
+  assert.ok(!/ C /.test(p.d), 'd 里没有贝塞尔段');
+  assert.equal((p.d.match(/ L/g) || []).length, pts.length - 1, '折点逐一连成线段');
+  assert.ok(ys.indexOf(p.my) !== -1, '中点标签锚在某条水平段的 y 上（水平段都在层间空隙的中线上）');
+});
+
+test('no segment of a long forward edge crosses a box in an intermediate layer', () => {
+  const g = longG();
+  const pts = g.longs[0].points;
+  // 前提（否则断言是空的）：层 1、层 2 的盒正压在 a、d 的中线上，直连必穿。
+  [1, 2].forEach((li) => {
+    assert.ok(realIds(g, li).some((id) => {
+      const b = boxOf(id, g);
+      return b.x1 <= pts[0].x && pts[0].x <= b.x2;
+    }), `层 ${li} 有盒压在中线上`);
+  });
+  assertNoBoxCut(g, g.longs);
+});
+
+test('a one-layer forward edge keeps the cubic bezier; only ≥2 hops go orthogonal', () => {
+  const g = L.flowGeometry(['a', 'b'], [{ from: 'a', to: 'b' }], SZ(['a', 'b']));
+  assert.deepEqual(g.longs, [], '跨层 1 不产生折点几何量（也不需要虚节点）');
+  assert.deepEqual(Object.keys(g.virtual), []);
+  const p = L.fwdPath(g.pos.a, g.pos.b, g.sizes.a, g.sizes.b);
+  assert.ok(/ C /.test(p.d), '仍然是三次贝塞尔');
+  assert.ok(p.d.startsWith('M118 ' + (g.pos.a.y + g.sizes.a.h) + ' '), '出边起点没变（源盒底边中点）');
+  assert.equal(Number(p.d.slice(p.d.lastIndexOf(' ') + 1)), g.pos.b.y - 8, '入端仍在目标盒上方 8px');
+});
+
+test('virtual nodes take a slot in the layer order but carry no box', () => {
+  const g = longG();
+  const vids = Object.keys(g.virtual);
+  assert.equal(vids.length, 2, 'a→d 跨 3 层，中间两层各插一个虚节点');
+  const flat = g.layers.reduce((acc, row) => acc.concat(row), []);
+  const rowYs = flat.map((id) => g.pos[id].y);
+  vids.forEach((v) => {
+    assert.ok(flat.indexOf(v) !== -1, '虚节点进层内序列（因此会被 barycenter 重排）');
+    assert.ok(g.pos[v], '虚节点有位次坐标——折线拿它当逐层穿下来的那一列');
+    assert.ok(rowYs.indexOf(g.pos[v].y) !== -1, '虚节点落在某一层的行带上');
+    assert.strictEqual(g.sizes[v], undefined, '虚节点不进盒尺寸表（那张表是「盒」的表）');
+  });
+  LONG_IDS.forEach((id) => assert.ok(!g.virtual[id],
+    '真实节点不会被标成虚节点——渲染层按 g.virtual 跳过，标错就会少画一个盒'));
+  assert.equal(g.fwd.length, 4, 'fwd 仍是 4 条真实边（虚节点不是边）');
+  assert.equal(g.back.length, 0);
+  // 计数口径的落点：虚节点绝不能成为一个端口单元（countPorts 的单位是「单元 id × 方向」）。
+  const counts = L.countPorts(g.fwd.map((e) => ({ from: e.from, to: e.to, conns: [{ label: '流转' }] })));
+  assert.deepEqual(Object.keys(counts).sort(), ['a', 'b', 'c', 'd'], '计数表里只有真实单元');
+  vids.forEach((v) => assert.strictEqual(counts[v], undefined, '虚节点不会成为一个端口单元'));
+});
+
+test('a long forward edge resolves inside the canvas width: the lane stays feedback-only', () => {
+  const g = longG();
+  const xs = g.longs[0].points.map((q) => q.x);
+  assert.ok(Math.min.apply(null, xs) >= 0, '折线不越出画布左侧');
+  assert.ok(Math.max.apply(null, xs) <= g.Wc,
+    '折线不越出 Wc——长前向边在画布内解决，不借右侧那条 170px 通道（ADR-0009）');
 });
 
 // ---- gridGeometry：无连接节点独立带 ----
@@ -232,6 +372,23 @@ test('bilingual fixture writes mid-point labels as action phrases, per language'
     '同一内容的两条边中点写法一致（同 label 复用同一句话）');
   assert.deepEqual(edges.map((e) => L.edgeLabel(e, 'en')),
     ['pass the parsed config', 'pass the parsed config', 'pass the source-tagged records']);
+});
+
+test('the bilingual fixture reroutes its one ≥2-layer edge clear of the boxes', () => {
+  // 真实产物形状上的同一条断言（照 flowSvg 的链路：顶层折叠 → 弱连通分量 → flowGeometry）。
+  const { edges } = topPorts(BI_IR);
+  const M = {}; BI_IR.modules.forEach((m) => (M[m.id] = m));
+  const G = {}; (BI_IR.groups || []).forEach((g) => (G[g.id] = g));
+  const comps = L.components(Object.keys(M), edges).filter((c) => c.edges.length > 0);
+  assert.equal(comps.length, 1, '前提：fixture 顶层是一整片');
+  const sz = {};
+  comps[0].nodes.forEach((id) => (sz[id] = G[id] ? { w: 282, h: 96 } : { w: 236, h: 78 }));
+  const g = L.flowGeometry(comps[0].nodes, comps[0].edges, sz);
+  assert.equal(g.longs.length, 1, 'fixture 里跨层 ≥2 的前向边只有一条');
+  assert.equal(g.longs[0].from, 'grp_io');
+  assert.equal(g.longs[0].to, 'build_index');
+  assert.equal(Object.keys(g.virtual).length, 1, '跨 2 层 → 中间层插一个虚节点');
+  assertNoBoxCut(g, g.longs);
 });
 
 // ---- nodeSvg：盒体（含端口标注） ----

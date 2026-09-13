@@ -21,13 +21,13 @@ m = t' + s'·p      （缩放后：同一内容点 p 仍在鼠标下）
 t' = m − (m − t) · (s' / s)
 ```
 
-代码里就是这一行（viewer.js:903–904）。`m` 由视口 `getBoundingClientRect()` 与 `e.clientX/Y` 相减得到——**必须减 rect.left/top**，否则页面有滚动或视口不在原点时锚点会偏。
+代码里就是这一行（viewer.js:1030-1031）。`m` 由视口 `getBoundingClientRect()` 与 `e.clientX/Y` 相减得到——**必须减 rect.left/top**，否则页面有滚动或视口不在原点时锚点会偏。
 
 缩放步长 1.1 倍（`e.deltaY < 0` 放大），钳制在 **[0.4, 3]**：下限保证缩到再小也点得中端口圆点（6px 半径），上限避免放大到只是看见几个像素。
 
 **边界**：`{passive: false}` + `e.preventDefault()` 阻止页面跟着滚——不给的话滚轮既缩放又滚动页面。
 
-**位置**：viewer.js:898。
+**位置**：viewer.js:1025。
 
 ---
 
@@ -44,7 +44,7 @@ t' = m − (m − t) · (s' / s)
 
 **为什么用 `active` 单例**：同一时刻只可能有一个画布在被拖。顶层画布和弹窗子图共用这套监听，靠 `active` 指向当前那个。
 
-**位置**：viewer.js:853-866（监听）、908（mousedown）。
+**位置**：viewer.js:980-993（监听）、viewer.js:1035（mousedown）。
 **测试**：`oh-grasp/fortest/smoke-viewer.js` 用 `.dispatch('click', {})` 模拟（桩里 `moved` 恒为 false）。
 
 ---
@@ -81,7 +81,7 @@ s      = min(fitMax, vw / W, vh_可用 / H)
 
 **视口尺寸的回退值**（`vw || 900`, `vh || 560`）：JSDOM / 桩环境下 `clientWidth` 为 0，没有回退值会算出 `s = 0`（内容缩成一个点），调试时误以为是布局 bug。
 
-**位置**：viewer.js:881（`FIT_MAX` 在 viewer.js:869、高度下限 `MIN_CANVAS_H` 在 viewer.js:872；可用视口高在 `renderA` 里算，viewer.js:996–1000）。
+**位置**：viewer.js:1008（`FIT_MAX` 在 viewer.js:996、高度下限 `MIN_CANVAS_H` 在 viewer.js:999；可用视口高在 `renderA` 里算，viewer.js:1123-1127）。
 
 ---
 
@@ -95,4 +95,4 @@ s      = min(fitMax, vw / W, vh_可用 / H)
 
 **返回值里的 `moved` 是给调用方用的**：节点点击处理器需要读 `sCtl.moved` 来判断这次 click 是不是拖拽的尾巴。传 `null` 给 badge 而不是传一个假元素——调用点因此不需要知道「没徽标时要传什么」。
 
-**位置**：viewer.js:875。
+**位置**：viewer.js:1002。
